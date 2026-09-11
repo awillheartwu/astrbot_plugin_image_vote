@@ -66,7 +66,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-12.8"
+BUILD = "2026-09-13.1"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -81,7 +81,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.9.3",
+    "0.10.0",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -108,10 +108,10 @@ class ImageVotePlugin(Star):
             len(self.project_service.list_registered()),
         )
 
-    def _apply_config(self, config: Any = None) -> None:
-        raw, source = self._resolve_raw_config(config)
+    def _apply_config(self, config: Any = None, source: Optional[str] = None) -> None:
+        raw, resolved_source = self._resolve_raw_config(config)
         self._raw_config = raw
-        self._config_source = source
+        self._config_source = source or resolved_source
         self.settings = VoteConfig.from_mapping(raw)
         data_dir = get_plugin_data_dir(self.context, Path(self.settings.output_root).expanduser())
         if self.store is None:
@@ -150,6 +150,7 @@ class ImageVotePlugin(Star):
             ),
             ai_summary_service=self._build_ai_summary_service(),
             notifier=self.adapter.send_text,
+            file_sender=self.adapter.send_file,
         )
 
     def _build_ai_summary_service(self):
@@ -196,18 +197,6 @@ class ImageVotePlugin(Star):
         candidates = []
         if isinstance(config, Mapping) and config:
             candidates.append((dict(config), "构造参数"))
-        attribute = getattr(self, "config", None)
-        if isinstance(attribute, Mapping) and attribute:
-            candidates.append((dict(attribute), "插件实例属性"))
-        getter = getattr(self.context, "get_config", None)
-        if callable(getter):
-            for args in ((), (PLUGIN_NAME,)):
-                try:
-                    value = getter(*args)
-                except Exception:
-                    continue
-                if isinstance(value, Mapping) and value and _looks_like_plugin_config(value):
-                    candidates.append((dict(value), "context.get_config"))
         manager = getattr(self.context, "astrbot_config_mgr", None)
         if manager is not None:
             for name in ("get_conf", "get_plugin_config", "get"):
@@ -220,15 +209,22 @@ class ImageVotePlugin(Star):
                     continue
                 if isinstance(value, Mapping) and value and _looks_like_plugin_config(value):
                     candidates.append((dict(value), "astrbot_config_mgr.%s" % name))
-        if self.store is not None:
-            path = Path(self.store.database_path).parent.parent / "config" / ("%s_config.json" % PLUGIN_NAME)
-            if path.is_file():
+        for path in self._plugin_config_files():
+            payload = self._read_config_file(path)
+            if isinstance(payload, Mapping) and payload and _looks_like_plugin_config(payload):
+                candidates.append((dict(payload), "配置文件 %s" % path.name))
+        attribute = getattr(self, "config", None)
+        if isinstance(attribute, Mapping) and attribute:
+            candidates.append((dict(attribute), "插件实例属性"))
+        getter = getattr(self.context, "get_config", None)
+        if callable(getter):
+            for args in ((), (PLUGIN_NAME,)):
                 try:
-                    payload = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    payload = None
-                if isinstance(payload, Mapping) and payload and _looks_like_plugin_config(payload):
-                    candidates.append((dict(payload), "配置文件 %s" % path))
+                    value = getter(*args)
+                except Exception:
+                    continue
+                if isinstance(value, Mapping) and value and _looks_like_plugin_config(value):
+                    candidates.append((dict(value), "context.get_config"))
         for raw, source in candidates:
             if _looks_like_plugin_config(raw) or source == "构造参数":
                 return raw, source
@@ -236,11 +232,47 @@ class ImageVotePlugin(Star):
             return candidates[0]
         return {}, "defaults"
 
+    def _plugin_config_files(self):
+        """AstrBot 把插件配置存成 <data>/config/<插件名>_config.json，UI 保存后会更新这个文件。"""
+        if self.store is None:
+            return []
+        config_dir = Path(self.store.database_path).parent.parent / "config"
+        found = []
+        expected = config_dir / ("%s_config.json" % PLUGIN_NAME)
+        if expected.is_file():
+            found.append(expected)
+        try:
+            for path in sorted(config_dir.glob("*image_vote*.json")):
+                if path.is_file() and path not in found:
+                    found.append(path)
+        except OSError:
+            pass
+        return found
+
+    def _read_config_file(self, path: Path):
+        cache = getattr(self, "_config_file_cache", None)
+        if cache is None:
+            cache = self._config_file_cache = {}
+        try:
+            stat = path.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            return None
+        cached = cache.get(str(path))
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = None
+        cache[str(path)] = (stamp, payload)
+        return payload
+
     def _ensure_config(self) -> None:
         raw, source = self._resolve_raw_config()
         if raw and raw != self._raw_config:
             logger.info("检测到配置更新（来源=%s），重新装配应用层", source)
-            self._apply_config(raw)
+            self._apply_config(raw, source=source)
 
     async def initialize(self):
         await self.store.initialize()
@@ -284,6 +316,16 @@ class ImageVotePlugin(Star):
                 yield self._plain_result(event, "只有 AstrBot 管理员可以管理项目登记表。")
                 return
             yield self._plain_result(event, self._registry_command_text(command, argument_text))
+            return
+
+        if command == "reloadconfig":
+            if not is_admin_event(event):
+                yield self._plain_result(event, "只有 AstrBot 管理员可以执行此操作。")
+                return
+            raw, _source = self._resolve_raw_config()
+            if raw:
+                self._apply_config(raw, source=_source)
+            yield self._plain_result(event, self._config_report_text())
             return
 
         group_id = get_group_id(event)
@@ -430,6 +472,7 @@ class ImageVotePlugin(Star):
             "register",
             "unregister",
             "projects",
+            "reloadconfig",
         }:
             return head, tail.strip() if separator else ""
         return "start", value
@@ -609,6 +652,32 @@ class ImageVotePlugin(Star):
         except Exception as exc:
             return "登记失败：%s" % exc
         return "已登记：%s → %s" % (name, registry.entries()[name]["path"])
+
+    def _config_report_text(self) -> str:
+        """把插件当前实际生效的配置打出来，用于确认 UI 保存的值有没有传到运行中的插件。"""
+        settings = self.settings
+        return (
+            "已重新读取配置（来源：%s）\n"
+            "发送间隔：%d 秒\n"
+            "最后一张额外等待：%d 秒\n"
+            "评分范围：%d-%d\n"
+            "报告模式：%s（单文件上限 %d MB）\n"
+            "结束提醒：%s · 自动报告：%s · 报告发群：%s\n"
+            "AI 总结：%s"
+            % (
+                self._config_source,
+                settings.default_interval_seconds,
+                settings.effective_final_grace_seconds,
+                settings.score_min,
+                settings.score_max,
+                settings.report_mode,
+                settings.single_html_max_mb,
+                "开" if settings.notify_on_finish else "关",
+                "开" if settings.auto_report_on_finish else "关",
+                "开" if settings.send_report_html else "关",
+                "开" if settings.ai_summary_enabled else "关",
+            )
+        )
 
     async def _status_text(self, group_id):
         managed = await self.session_manager.active_for_group(group_id)

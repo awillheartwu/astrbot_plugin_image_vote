@@ -192,6 +192,12 @@
         "type": "bool",
         "default": true,
         "hint": "关闭后会话正常结束但不生成报告，需要时由管理员执行 /vote export；大项目可以先关掉，等合适的时间再手动导出。"
+      },
+      "send_report_html": {
+        "description": "把单文件报告发到群里",
+        "type": "bool",
+        "default": false,
+        "hint": "仅在报告模式为 single_html 时生效：开启后会把生成的单文件报告作为附件发到投票群，方便群成员直接下载。"
       }
     }
   },

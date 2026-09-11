@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
     "send_failure_pause_threshold": 3,
     "notify_on_finish": True,
     "auto_report_on_finish": True,
+    "send_report_html": False,
 }
 
 
@@ -87,6 +88,7 @@ class VoteConfig:
     send_failure_pause_threshold: int = 3
     notify_on_finish: bool = True
     auto_report_on_finish: bool = True
+    send_report_html: bool = False
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "VoteConfig":

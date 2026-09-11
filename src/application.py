@@ -44,6 +44,7 @@ class VoteApplication:
         image_processor: Optional[object] = None,
         ai_summary_service: Optional[AiSummaryService] = None,
         notifier: Optional[Callable[[str, str], Awaitable[None]]] = None,
+        file_sender: Optional[Callable[[str, Path, str], Awaitable[None]]] = None,
     ):
         self.config = config
         self.projects = projects
@@ -55,6 +56,7 @@ class VoteApplication:
         self.image_processor = image_processor
         self.ai_summary_service = ai_summary_service
         self.notifier = notifier
+        self.file_sender = file_sender
         self._range_warned: set = set()
 
     async def prepare_session(self, group_id: str, umo: str, project_name: str) -> Session:
@@ -239,11 +241,14 @@ class VoteApplication:
             if self.config.notify_on_finish:
                 await self._notify_finish(session, statistics, report_enabled)
             if report_enabled:
+                logger.info("session %s 生成报告：模式=%s", session.short_id, self.config.report_mode)
                 try:
                     report_path = await self._generate_report(session, candidates, statistics)
                     session.output_path = str(report_path)
                     await self.store.save_session(session)
                     logger.info("session %s 报告已生成：%s", session.short_id, report_path)
+                    if self.config.send_report_html and self.config.report_mode == "single_html":
+                        await self._send_report_file(session, report_path)
                     if self.config.notify_on_finish:
                         await self._notify(
                             session.umo,
@@ -318,6 +323,19 @@ class VoteApplication:
                 hint,
             ),
         )
+
+    async def _send_report_file(self, session: Session, report_dir: Path) -> None:
+        """把单文件报告作为附件发到投票群。"""
+        if self.file_sender is None:
+            return
+        html = Path(report_dir) / "index.html"
+        if not html.is_file():
+            return
+        try:
+            await self.file_sender(session.umo, html, "%s-报告.html" % session.project_name)
+            logger.info("session %s 单文件报告已发到群里", session.short_id)
+        except Exception as exc:
+            logger.warning("单文件报告发送失败，可到报告目录自行取用：%s", exc)
 
     async def recover_incomplete_sessions(self) -> None:
         for session in await self.store.list_incomplete_sessions():

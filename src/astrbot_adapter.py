@@ -40,6 +40,21 @@ class AstrBotAdapter:
         if result is False:
             raise RuntimeError("AstrBot could not resolve unified message origin")
 
+    async def send_file(self, umo: str, path: Path, name: Optional[str] = None) -> None:
+        """把文件作为附件发送（单文件报告用），不同 AstrBot 版本的组件名不同，逐层降级。"""
+        label = name or path.name
+        try:
+            from astrbot.api.event import MessageChain
+
+            chain = MessageChain().message(label).file(str(path))
+        except (ImportError, AttributeError):
+            from astrbot.api.message_components import File, Plain
+
+            chain = [Plain(label), File(name=label, file=str(path))]
+        result = await self.context.send_message(umo, chain)
+        if result is False:
+            raise RuntimeError("AstrBot could not resolve unified message origin")
+
     def resolve_reply(self, event: Any) -> Optional[ReplyPayload]:
         message_obj = getattr(event, "message_obj", None)
         components = getattr(message_obj, "message", None) or []

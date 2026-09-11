@@ -500,6 +500,75 @@ class ApplicationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
+    def test_single_html_report_is_sent_to_group_when_enabled(self):
+        class SingleHtmlGenerator:
+            def __init__(self):
+                self.calls = 0
+
+            async def generate_single_html(
+                self, session, candidates, statistics, source_root, output_root, image_processor, max_mb,
+                ai_summary=None,
+            ):
+                self.calls += 1
+                report = Path(output_root) / "single-report"
+                report.mkdir(parents=True, exist_ok=True)
+                (report / "index.html").write_text("<html></html>", encoding="utf-8")
+                return report
+
+        async def scenario(root, generator, sent):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            (project_root / "one.png").write_bytes(b"x")
+            config = VoteConfig.from_mapping(
+                {
+                    "input_root": str(input_root),
+                    "output_root": str(root / "reports"),
+                    "report_mode": "single_html",
+                    "send_report_html": True,
+                    "notify_on_finish": False,
+                }
+            )
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+
+            async def sender(session, candidate, image_path):
+                return None
+
+            async def file_sender(umo, path, name):
+                sent.append((umo, Path(path).name, name))
+
+            application = VoteApplication(
+                config,
+                ProjectService(input_root),
+                store,
+                SessionManager(),
+                VoteRouter(),
+                sender=sender,
+                report_generator=generator,
+                image_processor=object(),
+                file_sender=file_sender,
+            )
+            session = await application.prepare_session("g1", "umo", "demo")
+            session.interval_seconds = 0
+            session.final_grace_seconds = 0
+            candidates = await store.list_candidates(session.id)
+
+            async def runner(current_session, control):
+                await application.run_session(current_session, candidates, control)
+
+            await application.sessions.start(session, runner)
+            managed = await application.sessions.active_for_group("g1")
+            await asyncio.wait_for(managed.task, timeout=2)
+            await store.close()
+
+        generator = SingleHtmlGenerator()
+        sent = []
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory), generator, sent))
+        self.assertEqual(generator.calls, 1)
+        self.assertEqual(sent, [("umo", "index.html", "demo-报告.html")])
+
     def test_consecutive_send_failures_pause_and_notify(self):
         async def scenario(root, notified):
             input_root = root / "projects"

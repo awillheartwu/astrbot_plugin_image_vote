@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -109,6 +110,45 @@ class MainTest(unittest.TestCase):
 
             removed = [item async for item in plugin.vote_command(AdminEvent("/vote unregister 海滨之家"))]
             self.assertIn("已取消登记", removed[0])
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_reloadconfig_reports_effective_values(self):
+        async def scenario(root):
+            plugin = ImageVotePlugin(TempContext(root))
+            await plugin.store.initialize()
+
+            replies = [item async for item in plugin.vote_command(AdminEvent("/vote reloadconfig"))]
+            self.assertIn("已重新读取配置", replies[0])
+            self.assertIn("发送间隔：20 秒", replies[0])
+            self.assertIn("报告模式：directory", replies[0])
+
+            denied = [item async for item in plugin.vote_command(FakeEvent("/vote reloadconfig"))]
+            self.assertIn("管理员", denied[0])
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_config_file_wins_over_stale_instance_attribute(self):
+        async def scenario(root):
+            plugin = ImageVotePlugin(TempContext(root))
+            await plugin.store.initialize()
+            plugin.config = {"default_interval_seconds": 20}
+            config_file = (
+                Path(plugin.store.database_path).parent.parent
+                / "config"
+                / "astrbot_plugin_image_vote_config.json"
+            )
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            config_file.write_text(
+                json.dumps({"default_interval_seconds": 5, "report_mode": "single_html"}), encoding="utf-8"
+            )
+
+            plugin._ensure_config()
+            self.assertEqual(plugin.settings.default_interval_seconds, 5)
+            self.assertEqual(plugin.settings.report_mode, "single_html")
+            self.assertIn("配置文件", plugin._config_source)
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))

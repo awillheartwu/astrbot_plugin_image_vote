@@ -371,6 +371,7 @@ candidate_id = sha1(relative_path + file_size + mtime_ns)
 /vote finish
 /vote export
 /vote cleanup <项目名|session_id|all>
+/vote reloadconfig
 ```
 
 ### 7.2 指令行为
@@ -459,6 +460,12 @@ candidate_id = sha1(relative_path + file_size + mtime_ns)
 
 - 对最近一个完成/取消 session 重新生成 HTML；
 - 不重新调用 AI，除非指定 `--ai` 或配置允许。
+
+#### `/vote reloadconfig`
+
+- 重新读取插件配置并打印当前实际生效的值：发送间隔、最后一张额外等待、评分范围、报告模式、结束通知与自动报告开关、报告是否发群、AI 总结开关；
+- 用于确认 WebUI 里保存的配置有没有传到运行中的插件（配置来源也会一并打印）；
+- 仅管理员可用。
 
 ---
 
@@ -1155,6 +1162,8 @@ single_html_max_mb = 50
 单文件报告超过限制，已自动生成目录式报告。
 ```
 
+单文件报告可以通过 `send_report_html` 配置在结束时作为附件发到投票群；目录模式不发送文件，报告仍在 `output_root` 下。
+
 ---
 
 ## 18.4 输出目录可指定
@@ -1381,11 +1390,14 @@ ai_bottom_n: int = 3
 ```text
 notify_on_finish: bool = true
 auto_report_on_finish: bool = true
+send_report_html: bool = false
 ```
 
 - `notify_on_finish`：结束时在投票群发一条提醒，内容包含项目名、图片数（含已发送张数）、有效票与参与人数；报告生成成功或失败时会再补一条。默认开启。
 - `auto_report_on_finish`：结束时自动生成报告。关闭后会话照常结束但不生成报告，需要时由管理员执行 `/vote export`；大项目可以先关掉，挑合适的时间手动导出。默认开启。
 - 这两个开关只影响收尾行为，不影响计票与持久化。
+- `send_report_html`：仅在 `report_mode = single_html` 时生效，开启后把生成的单文件报告作为附件发到投票群，方便群成员直接下载。默认关闭。
+- 配置读取顺序：构造参数 → `astrbot_config_mgr` → 磁盘上的 `<data>/config/<插件名>_config.json` → 插件实例属性 → `context.get_config()`。WebUI 保存后会更新配置文件，因此运行中的插件在收到下一条指令时会自动采用新值，不必重载插件。
 
 ### 恢复/清理
 

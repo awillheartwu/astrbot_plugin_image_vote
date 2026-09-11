@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 - 2026-09-12
+
+- 新增项目登记表 `projects.json`：项目名 → 容器内任意绝对路径，支持跨卷与任意层级，解析优先级高于别名与 `input_root`。
+- 新增管理员指令 `/vote register`、`/vote unregister`、`/vote projects`；`/vote list` 分开列出注册项目与目录项目。
+- 登记项可覆盖 `interval_seconds`、`recursive`、`description`；文件按修改时间自动重载，外部编辑无需重载插件。
+- `/vote check` 对登记项目只显示名称，绝对路径仅在管理员的 `/vote projects` 中呈现。
+- 测试从 58 增加到 62。
+
 ## 0.7.0 - 2026-09-12
 
 - 新增 `send_failure_pause_threshold`（默认 3，0 表示关闭）：连续发送失败达到阈值时自动暂停会话，并向投票群发送提示，管理员可用 `/vote resume` 继续。

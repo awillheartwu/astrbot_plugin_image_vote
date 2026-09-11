@@ -37,6 +37,8 @@
 
 其余包括最后一张的额外等待、权限控制（仅管理员可开始、群白名单）、报告压缩参数、AI 开关与 Top/Bottom 数量、发送重试次数、连续发送失败自动暂停阈值等。
 
+项目与目录的对应关系由登记表解决：`input_root` 只覆盖「根目录下一层子目录」这种布局，层级更深或分散在别处的目录，用管理员的 `/vote register <项目名> <容器内绝对路径>` 登记，或直接编辑插件数据目录下的 `projects.json`。登记项可带 `interval_seconds`、`recursive`、`description`，解析优先级高于别名与 `input_root`。
+
 ## 指令
 
 | 指令 | 权限 | 说明 |
@@ -50,6 +52,9 @@
 | `/vote stop` | 管理员 | 取消本次投票，保留已收到的投票 |
 | `/vote export` | 管理员 | 用最近一次完成或取消的会话重新生成报告 |
 | `/vote cleanup <短ID 或 项目名 或 all confirm>` | 管理员 | 只删除本插件生成的报告目录 |
+| `/vote register <项目名> <容器内绝对路径>` | 管理员 | 把任意目录登记成一个项目 |
+| `/vote unregister <项目名>` | 管理员 | 取消登记 |
+| `/vote projects` | 管理员 | 列出登记项与它们的容器内路径 |
 
 ## Docker 路径映射
 
@@ -94,6 +99,6 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v
 ## 已知限制
 
 - 只在 AstrBot 4.27.5 加 NapCat 的组合上做过真机验收，其他版本与平台未验证。
-- 项目目前仅支持 `input_root` 下的第一层子目录；跨目录登记在路线图里。
+- 跨目录项目要先用 volume 把图库根目录映射进容器，再用 `/vote register` 或 `projects.json` 登记；容器看不到的路径无法使用。
 - 报告里目前只有投票人昵称，头像与按人视图在路线图里。
 - `single_html` 模式可选，超过 `single_html_max_mb` 会自动回退目录模式。

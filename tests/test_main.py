@@ -1,5 +1,7 @@
 import asyncio
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from main import ImageVotePlugin
@@ -9,6 +11,19 @@ from src.models import Candidate, Session, SessionStatus
 class FakeContext:
     def get_config(self):
         return {"input_root": "./projects", "output_root": "./reports"}
+
+
+class TempContext:
+    """把 input_root / output_root 指到临时目录，避免测试写进仓库。"""
+
+    def __init__(self, root):
+        self._root = Path(root)
+
+    def get_config(self):
+        return {
+            "input_root": str(self._root / "projects"),
+            "output_root": str(self._root / "reports"),
+        }
 
 
 class FakeEvent:
@@ -41,6 +56,11 @@ class SelfMessageEvent:
         return "bot"
 
 
+class AdminEvent(FakeEvent):
+    def is_admin(self):
+        return True
+
+
 class MainTest(unittest.TestCase):
     def test_command_parser_preserves_project_name_spaces(self):
         self.assertEqual(ImageVotePlugin._parse_command("/vote check My Project"), ("check", "My Project"))
@@ -59,9 +79,36 @@ class MainTest(unittest.TestCase):
             plugin = ImageVotePlugin(FakeContext())
             replies = [item async for item in plugin.vote_command(FakeEvent("/vote list"))]
             self.assertEqual(len(replies), 1)
-            self.assertIn("可用项目", replies[0])
+            self.assertIn("暂无项目", replies[0])
 
         asyncio.run(scenario())
+
+    def test_register_unregister_and_projects_commands(self):
+        async def scenario(root):
+            deep = root / "deep" / "人物图"
+            deep.mkdir(parents=True)
+            plugin = ImageVotePlugin(TempContext(root))
+
+            denied = [item async for item in plugin.vote_command(FakeEvent("/vote projects"))]
+            self.assertIn("管理员", denied[0])
+
+            registered = [
+                item async for item in plugin.vote_command(AdminEvent("/vote register 海滨之家 %s" % deep))
+            ]
+            self.assertIn("已登记：海滨之家", registered[0])
+
+            listing = [item async for item in plugin.vote_command(AdminEvent("/vote projects"))]
+            self.assertIn("海滨之家", listing[0])
+            self.assertIn(str(deep), listing[0])
+
+            merged = [item async for item in plugin.vote_command(AdminEvent("/vote list"))]
+            self.assertIn("注册项目：海滨之家", merged[0])
+
+            removed = [item async for item in plugin.vote_command(AdminEvent("/vote unregister 海滨之家"))]
+            self.assertIn("已取消登记", removed[0])
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
 
     def test_start_command_requires_group_context(self):
         async def scenario():

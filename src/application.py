@@ -62,7 +62,9 @@ class VoteApplication:
             raise PermissionError("group is not allowed to use image voting")
         if await self.sessions.active_for_group(group_id) is not None:
             raise SessionAlreadyActiveError("group already has an active vote session")
-        snapshot = self.projects.inspect(project_name, self.config.recursive_scan)
+        options = self.projects.resolve_options(project_name)
+        recursive = bool(options.get("recursive", self.config.recursive_scan))
+        snapshot = self.projects.inspect(project_name, recursive)
         if not snapshot.candidates:
             raise ValueError("project contains no supported images")
         output_root = Path(self.config.output_root).expanduser()
@@ -78,7 +80,7 @@ class VoteApplication:
             project_name=snapshot.project_name,
             project_path=snapshot.project_path,
             status=SessionStatus.PREPARING,
-            interval_seconds=self.config.default_interval_seconds,
+            interval_seconds=int(options.get("interval_seconds") or self.config.default_interval_seconds),
             final_grace_seconds=self.config.effective_final_grace_seconds,
             score_min=self.config.score_min,
             score_max=self.config.score_max,

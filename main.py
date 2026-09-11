@@ -20,6 +20,7 @@ _application_module = _internal("src.application")
 _config_module = _internal("src.config")
 _persistence_module = _internal("src.persistence")
 _project_service_module = _internal("src.project_service")
+_project_registry_module = _internal("src.project_registry")
 _session_manager_module = _internal("src.session_manager")
 _vote_collector_module = _internal("src.vote_collector")
 _message_sender_module = _internal("src.message_sender")
@@ -51,6 +52,7 @@ VoteApplication = _application_module.VoteApplication
 VoteConfig = _config_module.VoteConfig
 SQLiteStore = _persistence_module.SQLiteStore
 ProjectService = _project_service_module.ProjectService
+ProjectRegistry = _project_registry_module.ProjectRegistry
 SessionManager = _session_manager_module.SessionManager
 VoteParser = _vote_collector_module.VoteParser
 VoteRouter = _vote_collector_module.VoteRouter
@@ -63,7 +65,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-12.3"
+BUILD = "2026-09-12.4"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -78,7 +80,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.7.0",
+    "0.8.0",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -97,11 +99,12 @@ class ImageVotePlugin(Star):
         self._config_source = "defaults"
         self._apply_config(config)
         logger.info(
-            "插件装配完成：构建=%s，%s，配置来源=%s，数据目录=%s",
+            "插件装配完成：构建=%s，%s，配置来源=%s，数据目录=%s，登记项目=%d",
             BUILD,
             compat_report(),
             self._config_source,
             self.store.database_path,
+            len(self.project_service.list_registered()),
         )
 
     def _apply_config(self, config: Any = None) -> None:
@@ -109,10 +112,11 @@ class ImageVotePlugin(Star):
         self._raw_config = raw
         self._config_source = source
         self.settings = VoteConfig.from_mapping(raw)
-        self.project_service = ProjectService(Path(self.settings.input_root))
         data_dir = get_plugin_data_dir(self.context, Path(self.settings.output_root).expanduser())
         if self.store is None:
             self.store = SQLiteStore(data_dir / "vote.db")
+        self.project_registry = ProjectRegistry(Path(self.store.database_path).parent / "projects.json")
+        self.project_service = ProjectService(Path(self.settings.input_root), registry=self.project_registry)
         if self.session_manager is None:
             self.session_manager = SessionManager()
         if self.adapter is None:
@@ -251,19 +255,34 @@ class ImageVotePlugin(Star):
             yield self._plain_result(event, "用法：/vote <项目名>，或 /vote list、/vote check <项目名>")
             return
         if command == "list":
+            registered = self.project_service.list_registered()
             projects = self.project_service.list_projects()
-            yield self._plain_result(event, "可用项目：\n" + ("\n".join(projects) if projects else "暂无项目"))
+            lines = []
+            if registered:
+                lines.append("注册项目：" + "、".join(registered))
+            if projects:
+                lines.append("目录项目：" + "、".join(projects))
+            yield self._plain_result(event, "\n".join(lines) if lines else "暂无项目")
             return
         if command == "check":
             if not argument_text:
                 yield self._plain_result(event, "用法：/vote check <项目名>")
                 return
             try:
-                snapshot = self.project_service.inspect(argument_text, self.settings.recursive_scan)
-                text = self._check_text(snapshot)
+                options = self.project_service.resolve_options(argument_text)
+                recursive = bool(options.get("recursive", self.settings.recursive_scan))
+                snapshot = self.project_service.inspect(argument_text, recursive)
+                text = self._check_text(snapshot, argument_text)
             except Exception as exc:
                 text = "预检失败：%s" % exc
             yield self._plain_result(event, text)
+            return
+
+        if command in {"register", "unregister", "projects"}:
+            if not is_admin_event(event):
+                yield self._plain_result(event, "只有 AstrBot 管理员可以管理项目登记表。")
+                return
+            yield self._plain_result(event, self._registry_command_text(command, argument_text))
             return
 
         group_id = get_group_id(event)
@@ -392,7 +411,20 @@ class ImageVotePlugin(Star):
             return "", ""
         head, separator, tail = value.partition(" ")
         head = head.lower()
-        if head in {"list", "check", "status", "pause", "resume", "stop", "finish", "export", "cleanup"}:
+        if head in {
+            "list",
+            "check",
+            "status",
+            "pause",
+            "resume",
+            "stop",
+            "finish",
+            "export",
+            "cleanup",
+            "register",
+            "unregister",
+            "projects",
+        }:
             return head, tail.strip() if separator else ""
         return "start", value
 
@@ -442,12 +474,12 @@ class ImageVotePlugin(Star):
             return "约 %d 分钟" % minutes
         return "约 %d 秒" % seconds
 
-    def _check_text(self, snapshot) -> str:
+    def _check_text(self, snapshot, project_name: str = "") -> str:
         numbered = sum(1 for item in snapshot.candidates if item.sequence_number is not None)
         plain = len(snapshot.candidates) - numbered
         lines = [
             "项目：%s" % snapshot.project_name,
-            "路径：%s" % self._relative_project_path(snapshot.project_path),
+            "路径：%s" % self._project_path_label(snapshot.project_path, project_name),
             "图片：%d（带序号 %d，普通命名 %d）" % (len(snapshot.candidates), numbered, plain),
             "原始总大小：%.1f MB" % (snapshot.total_size / (1024.0 * 1024.0)),
             "排序方式：%s" % snapshot.sort_mode,
@@ -500,6 +532,51 @@ class ImageVotePlugin(Star):
             return str(Path(project_path).relative_to(Path(self.settings.input_root).expanduser().resolve()))
         except ValueError:
             return Path(project_path).name
+
+    def _project_path_label(self, project_path: str, project_name: str) -> str:
+        if project_name and project_name in self.project_service.list_registered():
+            return "%s（已登记目录，绝对路径见 /vote projects）" % project_name
+        return self._relative_project_path(project_path)
+
+    def _registry_command_text(self, command: str, argument: str) -> str:
+        registry = self.project_registry
+        if command == "projects":
+            entries = registry.entries()
+            if not entries:
+                return "还没有登记项目。用法：/vote register <项目名> <容器内绝对路径>"
+            lines = ["已登记 %d 个项目：" % len(entries)]
+            for name in sorted(entries):
+                entry = entries[name]
+                extras = []
+                if entry.get("interval_seconds"):
+                    extras.append("间隔 %s 秒" % entry["interval_seconds"])
+                if entry.get("recursive"):
+                    extras.append("递归")
+                suffix = ("（%s）" % "、".join(extras)) if extras else ""
+                lines.append("· %s → %s%s" % (name, entry.get("path"), suffix))
+            return "\n".join(lines)
+
+        name, _separator, path_text = argument.partition(" ")
+        name = name.strip()
+        if not name:
+            if command == "register":
+                return "用法：/vote register <项目名> <容器内绝对路径>"
+            return "用法：/vote unregister <项目名>"
+        if command == "unregister":
+            try:
+                removed = registry.unregister(name)
+            except Exception as exc:
+                return "操作失败：%s" % exc
+            return ("已取消登记：%s" % name) if removed else ("没有登记过 %s" % name)
+
+        path_text = path_text.strip().strip('"').strip("'")
+        if not path_text:
+            return "用法：/vote register <项目名> <容器内绝对路径>"
+        try:
+            registry.register(name, Path(path_text))
+        except Exception as exc:
+            return "登记失败：%s" % exc
+        return "已登记：%s → %s" % (name, registry.entries()[name]["path"])
 
     async def _status_text(self, group_id):
         managed = await self.session_manager.active_for_group(group_id)

@@ -247,9 +247,10 @@ input_root
 
 解析优先级：
 
-1. 先查项目别名配置；
-2. 再查 `input_root/game_a` 文件夹；
-3. 找不到时报错并显示 `/vote list` 可用项目。
+1. 先查项目登记表（§5.4）；
+2. 再查项目别名配置；
+3. 再查 `input_root/game_a` 文件夹；
+4. 找不到时报错并显示 `/vote list` 可用项目。
 
 建议支持项目别名：
 
@@ -283,6 +284,40 @@ project.json
 后续可通过 `files` 显式指定顺序，但 MVP 可以先只实现自动扫描。
 
 ---
+
+### 5.4 项目登记表（任意目录）
+
+`input_root` 只覆盖「根目录下一层子目录」这一种布局。真实图库常常层级很深、分散在不同路径，因此插件支持一份管理员维护的登记表，把项目名映射到容器内的任意绝对路径。
+
+文件位置：插件数据目录下的 `projects.json`，与 `vote.db` 同级（通常已被 bind mount 出来，可以直接编辑）。
+
+```json
+{
+  "version": 1,
+  "projects": {
+    "海滨之家": {
+      "path": "/pictures/08_SLG/00XX_海滨之家/人物图",
+      "interval_seconds": 5,
+      "recursive": false,
+      "description": "角色图投票"
+    }
+  }
+}
+```
+
+- 键名即 `/vote <名字>` 使用的项目名，可以与文件夹名不同。
+- `path` 必须是容器内绝对路径。宿主机目录要先通过 volume 映射进容器；推荐一次挂载图库根目录（例如 `/volume1/05_Pictures:/pictures:ro`），之后任意层级都能用。
+- `interval_seconds`、`recursive`、`description` 可选，`interval_seconds` 覆盖该项目的默认发送间隔。
+- 解析优先级高于别名与 `input_root`。
+- 文件按修改时间自动重载，外部编辑后不需要重载插件。
+
+维护方式：
+
+- 群内管理员指令：`/vote register <项目名> <容器内绝对路径>`、`/vote unregister <项目名>`、`/vote projects`（列出登记项与路径）。
+- 直接编辑 `projects.json`。
+- 后续 Plugin Pages 管理页面提供目录浏览器与同样的增删改，写同一份文件。
+
+安全边界：登记只对 AstrBot 管理员开放；项目路径来自管理员登记，因此允许位于 `input_root` 之外（§26 的例外）；登记与解析都会校验目录存在；`/vote check` 对登记项目只显示名称，绝对路径只在管理员的 `/vote projects` 中呈现。
 
 ## 6. 图片扫描规则
 

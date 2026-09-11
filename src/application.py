@@ -77,7 +77,7 @@ class VoteApplication:
             short_id=secrets.token_hex(4).upper(),
             group_id=group_id,
             umo=umo,
-            project_name=snapshot.project_name,
+            project_name=project_name.strip() or snapshot.project_name,
             project_path=snapshot.project_path,
             status=SessionStatus.PREPARING,
             interval_seconds=int(options.get("interval_seconds") or self.config.default_interval_seconds),

@@ -8,6 +8,7 @@ from src.config import VoteConfig
 from src.models import SessionStatus
 from src.persistence import SQLiteStore
 from src.project_service import ProjectService
+from src.project_registry import ProjectRegistry
 from src.session_manager import SessionManager
 from src.vote_collector import VoteRouter
 
@@ -439,6 +440,31 @@ class ApplicationTest(unittest.TestCase):
             session = await application.prepare_session("g1", "umo", "demo")
             self.assertEqual(len(session.short_id), 8)
             self.assertTrue(all(char in "0123456789ABCDEF" for char in session.short_id))
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_registered_project_name_is_used_for_session(self):
+        async def scenario(root):
+            input_root = root / "projects"
+            input_root.mkdir(parents=True)
+            outside = root / "08_SLG" / "00XX_海滨之家" / "人物图"
+            outside.mkdir(parents=True)
+            (outside / "one.png").write_bytes(b"x")
+            registry = ProjectRegistry(root / "projects.json")
+            registry.register("海滨之家", outside)
+            config = VoteConfig.from_mapping(
+                {"input_root": str(input_root), "output_root": str(root / "reports")}
+            )
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            application = VoteApplication(
+                config, ProjectService(input_root, registry=registry), store, SessionManager(), VoteRouter()
+            )
+            session = await application.prepare_session("g1", "umo", "海滨之家")
+            self.assertEqual(session.project_name, "海滨之家")
+            self.assertEqual(Path(session.project_path), outside.resolve())
             await store.close()
 
         with tempfile.TemporaryDirectory() as directory:

@@ -30,12 +30,16 @@ class AstrBotAdapterTest(unittest.TestCase):
         self.assertEqual(payload.message_str, "[投票 003/010 · A7F3]")
         self.assertEqual(payload.message_id, "123")
 
-    def test_vote_message_contains_both_human_and_machine_markers(self):
-        session = Session("s1", "A7F3", "g1", "umo", "demo", "/tmp/demo", SessionStatus.RUNNING, candidate_count=10)
+    def test_vote_message_shows_project_and_title_without_duplicate_id(self):
+        session = Session(
+            "s1", "A7F3", "g1", "umo", "海滨之家", "/tmp/demo", SessionStatus.RUNNING, candidate_count=10
+        )
         candidate = Candidate("c1", "s1", 3, "three.png", "three.png", "Three", None, 1)
         text = build_vote_message(session, candidate)
         self.assertIn("[投票 003/010 · A7F3]", text)
-        self.assertIn("[VOTE:A7F3:3]", text)
+        self.assertIn("海滨之家 · Three", text)
+        self.assertNotIn("[VOTE:", text)
+        self.assertEqual(text.count("A7F3"), 1)
 
     def test_vote_message_follows_configured_score_range(self):
         session = Session(

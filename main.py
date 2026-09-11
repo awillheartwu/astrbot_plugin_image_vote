@@ -66,7 +66,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-12.6"
+BUILD = "2026-09-12.7"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -81,7 +81,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.9.1",
+    "0.9.2",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""

@@ -53,6 +53,7 @@ class VoteApplication:
         self.report_generator = report_generator
         self.image_processor = image_processor
         self.ai_summary_service = ai_summary_service
+        self._range_warned: set = set()
 
     async def prepare_session(self, group_id: str, umo: str, project_name: str) -> Session:
         if self.config.allowed_group_ids and group_id not in self.config.allowed_group_ids:
@@ -159,6 +160,7 @@ class VoteApplication:
                     await self.sender(session, candidate, source_path)
                     candidate.send_status = SendStatus.SENT
                     candidate.sent_at = utc_now()
+                    session.active_candidate_id = candidate.id
                     logger.debug(
                         "session %s 已发送第 %d/%d 张：%s",
                         session.short_id,
@@ -170,7 +172,7 @@ class VoteApplication:
                     candidate.send_status = SendStatus.SEND_FAILED
                     session.error_message = str(exc)
                     logger.warning(
-                        "session %s 第 %d 张发送失败，继续后续图片：%s",
+                        "session %s 第 %d 张发送失败，继续后续图片；窗口投票仍记在上一张成功发送的图片上：%s",
                         session.short_id,
                         candidate.display_index,
                         exc,
@@ -187,6 +189,7 @@ class VoteApplication:
                 await control.wait_for_interval(wait_seconds)
 
             session.status = SessionStatus.FINALIZING
+            session.finished_at = utc_now()
             await self.store.save_session(session)
             logger.info("session %s 进入 FINALIZING，已发送 %d 张", session.short_id, session.current_index)
             votes = await self.store.list_votes(session.id)
@@ -213,20 +216,24 @@ class VoteApplication:
                     logger.info("session %s AI 总结完成（%d 字）", session.short_id, len(summary))
                 else:
                     logger.warning("session %s AI 总结为空，继续按纯统计生成报告", session.short_id)
+            session.status = SessionStatus.COMPLETED
+            await self.store.save_session(session)
             if self.report_generator is not None and self.image_processor is not None:
                 try:
                     report_path = await self._generate_report(session, candidates, statistics)
                     session.output_path = str(report_path)
+                    await self.store.save_session(session)
                     logger.info("session %s 报告已生成：%s", session.short_id, report_path)
                 except Exception as exc:
                     session.error_message = "report generation failed: %s" % exc
-                    logger.error("session %s 报告生成失败：%s", session.short_id, exc)
-            session.status = SessionStatus.COMPLETED
-            session.finished_at = utc_now()
-            await self.store.save_session(session)
+                    await self.store.save_session(session)
+                    logger.error("session %s 报告生成失败，可用 /vote export 重试：%s", session.short_id, exc)
         except asyncio.CancelledError:
-            await self._cancel_session(session)
-            logger.info("session %s 已被取消", session.short_id)
+            if control.stop_requested:
+                await self._cancel_session(session)
+                logger.info("session %s 已按 /vote stop 取消", session.short_id)
+            else:
+                await self._pause_for_recovery(session)
             raise
         except Exception as exc:
             session.status = SessionStatus.FAILED
@@ -240,6 +247,17 @@ class VoteApplication:
         session.status = SessionStatus.CANCELLED
         session.finished_at = utc_now()
         await self.store.save_session(session)
+
+    async def _pause_for_recovery(self, session: Session) -> None:
+        """插件卸载/重载导致的停止：留下可恢复的暂停态，等管理员 /vote resume。"""
+        session.status = SessionStatus.PAUSED
+        session.error_message = "plugin unloaded while running; resume explicitly"
+        await self.store.save_session(session)
+        logger.info(
+            "session %s 因插件卸载/重载暂停在第 %d 张，可用 /vote resume 继续",
+            session.short_id,
+            session.current_index,
+        )
 
     async def recover_incomplete_sessions(self) -> None:
         for session in await self.store.list_incomplete_sessions():
@@ -332,6 +350,20 @@ class VoteApplication:
         logger.info("自动清理：删除 %d 个超过 %d 天的报告目录", removed, self.config.report_retention_days)
         return removed
 
+    def _warn_range_mismatch(self, session: Session) -> None:
+        """运行中改了评分范围时提醒一次：计票以会话快照为准，新范围下个会话生效。"""
+        if session.id in self._range_warned:
+            return
+        self._range_warned.add(session.id)
+        logger.warning(
+            "session %s 的评分范围是 %d-%d，当前配置是 %d-%d；本次投票按会话范围计票，新范围从下一个会话开始生效",
+            session.short_id,
+            session.score_min,
+            session.score_max,
+            self.config.score_min,
+            self.config.score_max,
+        )
+
     async def _generate_report(self, session: Session, candidates: Sequence[Candidate], statistics) -> Path:
         if self.config.report_mode == "single_html" and hasattr(self.report_generator, "generate_single_html"):
             return await self.report_generator.generate_single_html(
@@ -367,6 +399,8 @@ class VoteApplication:
     ) -> Optional[VoteDecision]:
         if not voter_id:
             return None
+        if (session.score_min, session.score_max) != (self.config.score_min, self.config.score_max):
+            self._warn_range_mismatch(session)
         decision = self.router.route(text, session, active_candidate, {item.display_index: item for item in candidates}, reply)
         if decision is None:
             return None

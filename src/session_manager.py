@@ -108,7 +108,7 @@ class SessionManager:
         try:
             await runner(session, control)
         except asyncio.CancelledError:
-            session.status = SessionStatus.CANCELLED
+            # 取消后的落库状态由应用层决定：显式 stop 才是 CANCELLED，插件卸载/重载要留下可恢复的会话。
             raise
         except Exception as exc:
             session.status = SessionStatus.FAILED
@@ -155,7 +155,6 @@ class SessionManager:
         async with self._lock:
             sessions = list(self._sessions.values())
         for managed in sessions:
-            managed.control.request_stop()
             managed.task.cancel()
         if sessions:
             await asyncio.gather(*(managed.task for managed in sessions), return_exceptions=True)

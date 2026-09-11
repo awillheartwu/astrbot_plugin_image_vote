@@ -171,6 +171,12 @@ def get_message_id(event: Any) -> str:
     return str(value or "")
 
 
+def get_self_id(event: Any) -> str:
+    message_obj = getattr(event, "message_obj", None)
+    value = getattr(message_obj, "self_id", None) or getattr(event, "self_id", None)
+    return str(value or "")
+
+
 def _sender_role(event: Any) -> str:
     for name in ("is_admin", "is_admin_user"):
         method = getattr(event, name, None)

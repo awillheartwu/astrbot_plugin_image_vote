@@ -42,6 +42,7 @@ get_message_id = _compat.get_message_id
 get_plugin_data_dir = _compat.get_plugin_data_dir
 get_sender_id = _compat.get_sender_id
 get_sender_name = _compat.get_sender_name
+get_self_id = _compat.get_self_id
 get_unified_message_origin = _compat.get_unified_message_origin
 is_admin_event = _compat.is_admin_event
 
@@ -62,7 +63,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-12.1"
+BUILD = "2026-09-12.2"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -77,7 +78,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.5.0",
+    "0.6.0",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -338,6 +339,9 @@ class ImageVotePlugin(Star):
     async def on_group_message(self, event: Any):
         self._ensure_config()
         group_id = get_group_id(event)
+        sender_id = get_sender_id(event)
+        if sender_id and sender_id == get_self_id(event):
+            return None
         managed = await self.session_manager.active_for_group(group_id)
         if managed is None:
             persisted = await self.store.latest_session_for_group(group_id)
@@ -349,14 +353,12 @@ class ImageVotePlugin(Star):
         candidates = await self.store.list_candidates(session.id)
         if not candidates:
             return None
-        active_candidate = None
-        if session.current_index > 0 and session.current_index <= len(candidates):
-            active_candidate = candidates[session.current_index - 1]
+        active_candidate = self._active_candidate(session, candidates)
         decision = await self.application.record_vote(
             session,
             candidates,
             get_event_text(event),
-            get_sender_id(event),
+            sender_id,
             get_sender_name(event),
             active_candidate,
             reply=self.adapter.resolve_reply(event),
@@ -407,6 +409,18 @@ class ImageVotePlugin(Star):
             if candidate.id == candidate_id:
                 return candidate.display_index
         return 0
+
+    @staticmethod
+    def _active_candidate(session, candidates):
+        """投票目标 = 最近一次成功发送的图片；发送失败的图片不会成为目标。"""
+        active_id = getattr(session, "active_candidate_id", None)
+        if active_id:
+            for candidate in candidates:
+                if candidate.id == active_id:
+                    return candidate
+        if 0 < session.current_index <= len(candidates):
+            return candidates[session.current_index - 1]
+        return None
 
     def _relative_output_path(self, path):
         try:
@@ -493,7 +507,7 @@ class ImageVotePlugin(Star):
             return "当前群没有投票记录。"
         candidates = await self.store.list_candidates(session.id)
         votes = await self.store.list_votes(session.id)
-        current = candidates[session.current_index - 1] if 0 < session.current_index <= len(candidates) else None
+        current = self._active_candidate(session, candidates)
         current_votes = sum(1 for vote in votes if current is not None and vote.candidate_id == current.id)
         next_candidate = candidates[session.current_index] if session.current_index < len(candidates) else None
         countdown = managed.control.seconds_until_next if managed is not None else None

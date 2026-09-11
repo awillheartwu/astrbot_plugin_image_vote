@@ -72,3 +72,25 @@ class PersistenceTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory) / "vote.db"))
+
+    def test_finalizing_sessions_are_recoverable_and_active_candidate_round_trips(self):
+        async def scenario(database_path):
+            store = SQLiteStore(database_path)
+            await store.initialize()
+            await store.save_session(
+                Session(
+                    "s1", "A7F3", "g1", "umo", "project", "/tmp/project",
+                    SessionStatus.FINALIZING, candidate_count=1,
+                )
+            )
+            incomplete = [item.id for item in await store.list_incomplete_sessions()]
+            self.assertIn("s1", incomplete)
+
+            session = await store.get_session("s1")
+            session.active_candidate_id = "c9"
+            await store.save_session(session)
+            self.assertEqual((await store.get_session("s1")).active_candidate_id, "c9")
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "vote.db"))

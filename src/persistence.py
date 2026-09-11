@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     final_grace_seconds INTEGER NOT NULL,
     score_min INTEGER NOT NULL DEFAULT 1,
     score_max INTEGER NOT NULL DEFAULT 4,
+    active_candidate_id TEXT,
     current_index INTEGER NOT NULL DEFAULT 0,
     candidate_count INTEGER NOT NULL DEFAULT 0,
     output_path TEXT,
@@ -93,6 +94,7 @@ class SQLiteStore:
         for name, statement in (
             ("score_min", "ALTER TABLE sessions ADD COLUMN score_min INTEGER NOT NULL DEFAULT 1"),
             ("score_max", "ALTER TABLE sessions ADD COLUMN score_max INTEGER NOT NULL DEFAULT 4"),
+            ("active_candidate_id", "ALTER TABLE sessions ADD COLUMN active_candidate_id TEXT"),
         ):
             if name not in columns:
                 connection.execute(statement)
@@ -113,15 +115,16 @@ class SQLiteStore:
             """INSERT INTO sessions (
                 id, short_id, group_id, umo, project_name, project_path, status,
                 interval_seconds, final_grace_seconds, score_min, score_max,
-                current_index, candidate_count,
+                active_candidate_id, current_index, candidate_count,
                 output_path, created_at, started_at, finished_at, ai_summary, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 interval_seconds=excluded.interval_seconds,
                 final_grace_seconds=excluded.final_grace_seconds,
                 score_min=excluded.score_min,
                 score_max=excluded.score_max,
+                active_candidate_id=excluded.active_candidate_id,
                 current_index=excluded.current_index,
                 candidate_count=excluded.candidate_count,
                 output_path=excluded.output_path,
@@ -141,6 +144,7 @@ class SQLiteStore:
                 session.final_grace_seconds,
                 session.score_min,
                 session.score_max,
+                session.active_candidate_id,
                 session.current_index,
                 session.candidate_count,
                 session.output_path,
@@ -292,8 +296,13 @@ class SQLiteStore:
     def _list_incomplete_sessions_sync(self) -> List[Session]:
         connection = self._require_connection()
         rows = connection.execute(
-            "SELECT * FROM sessions WHERE status IN (?, ?, ?) ORDER BY created_at",
-            (SessionStatus.PREPARING.value, SessionStatus.RUNNING.value, SessionStatus.PAUSED.value),
+            "SELECT * FROM sessions WHERE status IN (?, ?, ?, ?) ORDER BY created_at",
+            (
+                SessionStatus.PREPARING.value,
+                SessionStatus.RUNNING.value,
+                SessionStatus.PAUSED.value,
+                SessionStatus.FINALIZING.value,
+            ),
         ).fetchall()
         return [self._session_from_row(row) for row in rows]
 
@@ -311,6 +320,7 @@ class SQLiteStore:
             final_grace_seconds=row["final_grace_seconds"],
             score_min=row["score_min"],
             score_max=row["score_max"],
+            active_candidate_id=row["active_candidate_id"],
             current_index=row["current_index"],
             candidate_count=row["candidate_count"],
             output_path=row["output_path"],

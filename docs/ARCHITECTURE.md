@@ -69,8 +69,10 @@ SQLite 表为 `sessions`、`candidates`、`votes`。
 
 ## 下一步接力顺序
 
-1. 用 `tools/probe_plugin` 触发一次真实引用消息，确认 `Reply` 组件字段；据此决定 `src/astrbot_adapter.py` 是否需要 OneBot `get_msg` 回查。
-2. 拿到 `Context.llm_generate` 与 `get_current_chat_provider_id` 签名后接线 `AiSummaryService`（`main.py` 目前没有传 `ai_summary_service`，AI 总结处于未接线状态）。
-3. 用一个 19 张图的小项目（宿主目录映射到容器内的 `/vote/projects/sample`）做小规模 controlled acceptance：开始、窗口投票、引用投票、pause/resume、finish、报告生成。
-4. 报告生成依赖 Pillow，实测容器内可用；首次真机跑报告时要确认 `output_root` 可写。
-5. 单元测试不能替代 Reply 与发送链路验收；验收前不要把 `input_root` 指向真实的大项目。
+已完成并真机验证：引用消息的 `Reply` 结构（无需 OneBot `get_msg` 回查）、`Context.llm_generate` 与 `get_current_chat_provider_id` 接线、19 张图小项目的完整轮播与报告生成、Pillow 派生图。
+
+接下来：
+
+1. 补齐验收缺口：多群并行互不影响、跨进程重启恢复、500 MB 级项目的内存表现。插件重载路径已回归验证为 `PAUSED` 可续跑。
+2. 按 `docs/ROADMAP.md` 的批次推进：项目注册表 → 投票明细与按人分析 → 头像 → 报告页面重构，之后是管理页面。
+3. 单元测试不能替代 Reply 与发送链路验收；验收前不要把 `input_root` 指向真实的大项目。

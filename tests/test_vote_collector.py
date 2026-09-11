@@ -64,3 +64,19 @@ class VoteCollectorTest(unittest.TestCase):
                 "4", session, active, {3: quoted, 10: active}, reply
             )
         )
+
+    def test_router_uses_session_score_range(self):
+        narrow = Session(
+            "session-1", "A7F3", "group-1", "umo", "project", "/tmp/project",
+            SessionStatus.RUNNING, score_min=1, score_max=4,
+        )
+        wide = Session(
+            "session-2", "B1C2", "group-1", "umo", "project", "/tmp/project",
+            SessionStatus.RUNNING, score_min=1, score_max=10,
+        )
+        active = candidate(10)
+        router = VoteRouter(VoteParser(1, 10))
+        self.assertIsNone(router.route("10", narrow, active, {10: active}))
+        decision = router.route("10", wide, active, {10: active})
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.score, 10)

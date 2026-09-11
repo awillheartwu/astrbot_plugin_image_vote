@@ -47,7 +47,7 @@ class VoteRouter:
         candidates_by_index: Mapping[int, Candidate],
         reply: Optional[ReplyPayload] = None,
     ) -> Optional[VoteDecision]:
-        score = self.parser.parse(text)
+        score = self._parser_for(session).parse(text)
         if score is None or session.status not in {SessionStatus.RUNNING, SessionStatus.PAUSED}:
             return None
         if reply is not None:
@@ -60,3 +60,11 @@ class VoteRouter:
         if active_candidate is None:
             return None
         return VoteDecision(active_candidate.id, score, VoteSource.CURRENT_WINDOW)
+
+    def _parser_for(self, session: Session) -> VoteParser:
+        """计票范围以会话为准；运行中改配置只影响以后新建的会话。"""
+        session_min = getattr(session, "score_min", self.parser.score_min)
+        session_max = getattr(session, "score_max", self.parser.score_max)
+        if (session_min, session_max) == (self.parser.score_min, self.parser.score_max):
+            return self.parser
+        return VoteParser(session_min, session_max)

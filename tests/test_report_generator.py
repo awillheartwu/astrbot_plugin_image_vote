@@ -99,6 +99,39 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertFalse(old.exists())
             self.assertTrue(fresh.exists())
 
+    def test_report_renders_configured_score_range(self):
+        async def scenario(root):
+            source_root = root / "input"
+            output_root = root / "output"
+            source_root.mkdir()
+            source = source_root / "one.png"
+            source.write_bytes(b"original")
+            candidate = Candidate("c1", "s1", 1, source.name, source.name, "One", None, source.stat().st_size)
+            distribution = {score: 0 for score in range(1, 11)}
+            distribution[10] = 2
+            statistics = SessionStatistics(
+                total_candidates=1,
+                total_valid_votes=2,
+                unique_voters=2,
+                average_votes_per_candidate=2.0,
+                overall_average_score=10.0,
+                candidates=(CandidateStatistics("c1", 1, "One", 2, 10.0, distribution, 1),),
+            )
+            session = Session(
+                "s1", "A7F3", "g1", "umo", "project", str(source_root), SessionStatus.COMPLETED,
+                candidate_count=1, score_min=1, score_max=10,
+            )
+            report = await DirectoryReportGenerator().generate(
+                session, [candidate], statistics, source_root, output_root, FakeImageProcessor()
+            )
+            page = (report / "index.html").read_text(encoding="utf-8")
+            self.assertIn("评分范围 1-10", page)
+            self.assertIn("10分 2", page)
+            self.assertIn("5分 0", page)
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
     def test_single_html_embeds_derivatives_and_falls_back_when_too_large(self):
         async def scenario(root):
             source_root = root / "input"

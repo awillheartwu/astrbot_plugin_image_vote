@@ -40,3 +40,11 @@ class ConfigMappingTest(unittest.TestCase):
         for group in schema.values():
             keys.update(group["items"].keys())
         self.assertEqual(keys, {item.name for item in fields(VoteConfig)})
+
+    def test_score_range_validation(self):
+        ten = VoteConfig.from_mapping({"input_root": "/a", "output_root": "/b", "score_max": 10})
+        self.assertEqual((ten.score_min, ten.score_max), (1, 10))
+        with self.assertRaises(ValueError):
+            VoteConfig.from_mapping({"input_root": "/a", "output_root": "/b", "score_max": 101})
+        with self.assertRaises(ValueError):
+            VoteConfig.from_mapping({"input_root": "/a", "output_root": "/b", "score_min": 5, "score_max": 4})

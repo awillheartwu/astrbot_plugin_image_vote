@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Mapping, Optional
 
 from .models import Candidate, Session, SessionStatus, VoteDecision, VoteSource
@@ -11,10 +12,15 @@ class VoteParser:
     def __init__(self, score_min: int = 1, score_max: int = 4):
         self.score_min = score_min
         self.score_max = score_max
+        self.score_digits = max(1, len(str(max(score_max, 0))))
 
     def parse(self, text: str) -> Optional[int]:
-        value = (text or "").strip()
-        if not re.fullmatch(r"[0-9]", value):
+        value = unicodedata.normalize("NFKC", text or "").strip()
+        if not value or len(value) > self.score_digits:
+            return None
+        if not re.fullmatch(r"[0-9]+", value):
+            return None
+        if len(value) > 1 and value.startswith("0"):
             return None
         score = int(value)
         if self.score_min <= score <= self.score_max:

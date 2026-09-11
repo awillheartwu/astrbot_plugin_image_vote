@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     status TEXT NOT NULL,
     interval_seconds INTEGER NOT NULL,
     final_grace_seconds INTEGER NOT NULL,
+    score_min INTEGER NOT NULL DEFAULT 1,
+    score_max INTEGER NOT NULL DEFAULT 4,
     current_index INTEGER NOT NULL DEFAULT 0,
     candidate_count INTEGER NOT NULL DEFAULT 0,
     output_path TEXT,
@@ -81,7 +83,19 @@ class SQLiteStore:
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.executescript(SCHEMA)
+        self._migrate_sync()
         self._connection.commit()
+
+    def _migrate_sync(self) -> None:
+        """老库补齐新增列；CREATE TABLE IF NOT EXISTS 不会改动已存在的表。"""
+        connection = self._require_connection()
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(sessions)")}
+        for name, statement in (
+            ("score_min", "ALTER TABLE sessions ADD COLUMN score_min INTEGER NOT NULL DEFAULT 1"),
+            ("score_max", "ALTER TABLE sessions ADD COLUMN score_max INTEGER NOT NULL DEFAULT 4"),
+        ):
+            if name not in columns:
+                connection.execute(statement)
 
     async def close(self) -> None:
         async with self._lock:
@@ -98,13 +112,16 @@ class SQLiteStore:
         connection.execute(
             """INSERT INTO sessions (
                 id, short_id, group_id, umo, project_name, project_path, status,
-                interval_seconds, final_grace_seconds, current_index, candidate_count,
+                interval_seconds, final_grace_seconds, score_min, score_max,
+                current_index, candidate_count,
                 output_path, created_at, started_at, finished_at, ai_summary, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 interval_seconds=excluded.interval_seconds,
                 final_grace_seconds=excluded.final_grace_seconds,
+                score_min=excluded.score_min,
+                score_max=excluded.score_max,
                 current_index=excluded.current_index,
                 candidate_count=excluded.candidate_count,
                 output_path=excluded.output_path,
@@ -122,6 +139,8 @@ class SQLiteStore:
                 session.status.value,
                 session.interval_seconds,
                 session.final_grace_seconds,
+                session.score_min,
+                session.score_max,
                 session.current_index,
                 session.candidate_count,
                 session.output_path,
@@ -290,6 +309,8 @@ class SQLiteStore:
             status=SessionStatus(row["status"]),
             interval_seconds=row["interval_seconds"],
             final_grace_seconds=row["final_grace_seconds"],
+            score_min=row["score_min"],
+            score_max=row["score_max"],
             current_index=row["current_index"],
             candidate_count=row["candidate_count"],
             output_path=row["output_path"],

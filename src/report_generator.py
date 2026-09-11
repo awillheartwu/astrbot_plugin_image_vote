@@ -94,6 +94,8 @@ class DirectoryReportGenerator:
                 "project_name": session.project_name,
                 "candidate_count": session.candidate_count,
                 "status": session.status.value,
+                "score_min": session.score_min,
+                "score_max": session.score_max,
                 "started_at": session.started_at,
                 "finished_at": session.finished_at,
             },
@@ -200,7 +202,11 @@ class DirectoryReportGenerator:
         for row in rows:
             average = "无投票" if row["average_score"] is None else "%.2f" % row["average_score"]
             rank = "—" if row["rank"] is None else str(row["rank"])
-            distribution = row["score_distribution"]
+            distribution = {int(key): value for key, value in (row["score_distribution"] or {}).items()}
+            distribution_text = " · ".join(
+                "%d分 %d" % (score, distribution.get(score, 0))
+                for score in range(int(session["score_min"]), int(session["score_max"]) + 1)
+            )
             failure = (
                 '<p class="send-failed">这张图发送失败，未计入有效统计</p>'
                 if row.get("send_status") == "send_failed"
@@ -210,7 +216,7 @@ class DirectoryReportGenerator:
                 """<article class=\"candidate-card\" data-title=\"%s\" data-index=\"%s\" data-rank=\"%s\">
   <a href=\"%s\"><img loading=\"lazy\" src=\"%s\" alt=\"%s\"></a>
   <div class=\"candidate-content\"><h2>#%s %s</h2><p class=\"score\">排名 %s · 平均分 %s · %s 人投票</p>
-  <p class=\"distribution\">1分 %s · 2分 %s · 3分 %s · 4分 %s</p>%s<p class=\"filename\">%s</p></div></article>"""
+  <p class=\"distribution\">%s</p>%s<p class=\"filename\">%s</p></div></article>"""
                 % (
                     html.escape(str(row["display_title"]), quote=True),
                     row["display_index"],
@@ -223,10 +229,7 @@ class DirectoryReportGenerator:
                     rank,
                     average,
                     row["vote_count"],
-                    distribution.get(1, 0),
-                    distribution.get(2, 0),
-                    distribution.get(3, 0),
-                    distribution.get(4, 0),
+                    distribution_text,
                     failure,
                     html.escape(str(row["source_filename"])),
                 )
@@ -236,7 +239,7 @@ class DirectoryReportGenerator:
 <html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <title>%s · 图片投票报告</title><link rel=\"stylesheet\" href=\"./report.css\"></head>
 <body><main class=\"container\"><header><div class=\"eyebrow\">ASTRBOT IMAGE VOTE</div><h1>%s</h1>
-<p class=\"meta\">Session %s · 群 %s · 状态 %s</p>
+<p class=\"meta\">Session %s · 群 %s · 状态 %s · 评分范围 %s-%s</p>
 <p class=\"meta\">开始 %s · 结束 %s</p><section class=\"summary-grid\">
 <div><strong>%s</strong><span>图片</span></div><div><strong>%s</strong><span>有效票</span></div><div><strong>%s</strong><span>参与人数</span></div><div><strong>%s</strong><span>总体平均分</span></div></section>
 <section class=\"ai-summary\"><h2>总结</h2><p>%s</p></section></header>
@@ -247,6 +250,8 @@ class DirectoryReportGenerator:
             html.escape(str(session["short_id"])),
             html.escape(str(session["group_id"])),
             html.escape(str(session["status"])),
+            session["score_min"],
+            session["score_max"],
             html.escape(_format_time(session.get("started_at"))),
             html.escape(_format_time(session.get("finished_at"))),
             statistics["total_candidates"],

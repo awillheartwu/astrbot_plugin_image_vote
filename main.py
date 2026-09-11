@@ -62,7 +62,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-11.4"
+BUILD = "2026-09-12.1"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -77,7 +77,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.4.0",
+    "0.5.0",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -436,6 +436,7 @@ class ImageVotePlugin(Star):
             "图片：%d（带序号 %d，普通命名 %d）" % (len(snapshot.candidates), numbered, plain),
             "原始总大小：%.1f MB" % (snapshot.total_size / (1024.0 * 1024.0)),
             "排序方式：%s" % snapshot.sort_mode,
+            "评分范围：%d-%d" % (self.settings.score_min, self.settings.score_max),
             "预计耗时：%s"
             % self._estimated_duration(
                 len(snapshot.candidates),

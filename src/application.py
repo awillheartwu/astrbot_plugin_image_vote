@@ -77,6 +77,8 @@ class VoteApplication:
             status=SessionStatus.PREPARING,
             interval_seconds=self.config.default_interval_seconds,
             final_grace_seconds=self.config.effective_final_grace_seconds,
+            score_min=self.config.score_min,
+            score_max=self.config.score_max,
             candidate_count=len(snapshot.candidates),
             created_at=utc_now(),
         )
@@ -191,8 +193,8 @@ class VoteApplication:
             statistics = calculate_statistics(
                 candidates,
                 votes,
-                score_min=self.config.score_min,
-                score_max=self.config.score_max,
+                score_min=session.score_min,
+                score_max=session.score_max,
             )
             if self.ai_summary_service is not None and self.config.ai_summary_enabled:
                 summary = await self.ai_summary_service.summarize(
@@ -201,6 +203,8 @@ class VoteApplication:
                         statistics,
                         top_n=self.config.ai_top_n,
                         bottom_n=self.config.ai_bottom_n,
+                        score_min=session.score_min,
+                        score_max=session.score_max,
                     ),
                     umo=session.umo,
                 )
@@ -305,8 +309,8 @@ class VoteApplication:
         statistics = calculate_statistics(
             candidates,
             votes,
-            score_min=self.config.score_min,
-            score_max=self.config.score_max,
+            score_min=session.score_min,
+            score_max=session.score_max,
         )
         report_path = await self._generate_report(session, candidates, statistics)
         session.output_path = str(report_path)

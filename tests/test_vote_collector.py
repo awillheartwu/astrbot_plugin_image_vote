@@ -26,6 +26,22 @@ class VoteCollectorTest(unittest.TestCase):
         for value in ("0", "5", "03", "3分", "评分3", "3.0", "1 2", "👍3"):
             self.assertIsNone(parser.parse(value))
 
+    def test_parser_accepts_two_digits_when_range_allows(self):
+        parser = VoteParser(1, 10)
+        self.assertEqual(parser.parse("10"), 10)
+        self.assertEqual(parser.parse(" 9 "), 9)
+        for value in ("11", "05", "0", "100", "10分"):
+            self.assertIsNone(parser.parse(value))
+        five = VoteParser(1, 5)
+        self.assertEqual(five.parse("5"), 5)
+        self.assertIsNone(five.parse("6"))
+        self.assertIsNone(five.parse("10"))
+
+    def test_parser_normalizes_full_width_digits(self):
+        self.assertEqual(VoteParser(1, 4).parse("３"), 3)
+        self.assertEqual(VoteParser(1, 10).parse("１０"), 10)
+        self.assertIsNone(VoteParser(1, 4).parse("３分"))
+
     def test_current_window_routes_to_active_candidate(self):
         session = Session("session-1", "A7F3", "group-1", "umo", "project", "/tmp/project", SessionStatus.RUNNING)
         active = candidate(10)

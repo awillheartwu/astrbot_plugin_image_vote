@@ -94,8 +94,8 @@ class VoteConfig:
         return config
 
     def validate(self) -> None:
-        if self.score_min < 0 or self.score_max > 9 or self.score_min > self.score_max:
-            raise ValueError("score_min/score_max must be a single-digit inclusive range")
+        if self.score_min < 0 or self.score_max > 100 or self.score_min > self.score_max:
+            raise ValueError("score_min/score_max must satisfy 0 <= min <= max <= 100")
         if self.default_interval_seconds <= 0:
             raise ValueError("default_interval_seconds must be positive")
         if self.final_grace_seconds < 0:

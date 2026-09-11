@@ -12,7 +12,7 @@ def build_vote_message(session: Session, candidate: Candidate) -> str:
         "[投票 %03d/%03d · %s]\n"
         "[VOTE:%s:%d]\n"
         "%s\n"
-        "回复 1-4 评分；也可引用之前的投票图重新评分"
+        "回复 %d-%d 评分；也可引用之前的投票图重新评分"
         % (
             candidate.display_index,
             session.candidate_count,
@@ -20,6 +20,8 @@ def build_vote_message(session: Session, candidate: Candidate) -> str:
             session.short_id,
             candidate.display_index,
             candidate.display_title,
+            session.score_min,
+            session.score_max,
         )
     )
 

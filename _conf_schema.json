@@ -27,7 +27,7 @@
   "voting": {
     "description": "投票设置",
     "type": "object",
-    "hint": "评分范围默认 1-4，普通群消息只有内容严格等于单个数字时才计票。",
+    "hint": "评分范围默认 1-4，可改成 1-5 或 1-10；只有内容严格等于范围内数字的消息才计票，10 分制下两位数有效。",
     "items": {
       "default_interval_seconds": {
         "description": "每张图发送间隔（秒）",
@@ -43,12 +43,14 @@
       "score_min": {
         "description": "最低分",
         "type": "int",
-        "default": 1
+        "default": 1,
+        "hint": "与最高分一起决定评分制，常用组合是 1-4、1-5、1-10。"
       },
       "score_max": {
         "description": "最高分",
         "type": "int",
-        "default": 4
+        "default": 4,
+        "hint": "10 分制填 10，群消息提示与报告标签会自动跟着变成 1-10；上限 100。"
       },
       "same_user_vote_policy": {
         "description": "同一用户重复投票策略",

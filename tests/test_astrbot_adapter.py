@@ -37,3 +37,10 @@ class AstrBotAdapterTest(unittest.TestCase):
         self.assertIn("[投票 003/010 · A7F3]", text)
         self.assertIn("[VOTE:A7F3:3]", text)
 
+    def test_vote_message_follows_configured_score_range(self):
+        session = Session(
+            "s1", "A7F3", "g1", "umo", "demo", "/tmp/demo", SessionStatus.RUNNING,
+            candidate_count=10, score_min=1, score_max=10,
+        )
+        candidate = Candidate("c1", "s1", 3, "three.png", "three.png", "Three", None, 1)
+        self.assertIn("回复 1-10 评分", build_vote_message(session, candidate))

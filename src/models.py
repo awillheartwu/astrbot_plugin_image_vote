@@ -52,6 +52,8 @@ class Session:
     status: SessionStatus = SessionStatus.IDLE
     interval_seconds: int = 20
     final_grace_seconds: int = 20
+    score_min: int = 1
+    score_max: int = 4
     current_index: int = 0
     candidate_count: int = 0
     output_path: Optional[str] = None

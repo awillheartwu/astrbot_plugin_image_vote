@@ -3,7 +3,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.models import Candidate, CandidateStatistics, Session, SessionStatistics, SessionStatus, VoteSource
+from src.models import (
+    Candidate,
+    CandidateStatistics,
+    CharacterStatistics,
+    Session,
+    SessionStatistics,
+    SessionStatus,
+    VoteSource,
+)
 from src.path_guard import PathGuard, UnsafePathError
 from src.report_generator import DirectoryReportGenerator, PLUGIN_NAME, REPORT_MARKER
 from src.report_generator import ReportCleanupService
@@ -131,6 +139,50 @@ class ReportGeneratorTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
+
+    def test_character_summary_appears_only_when_images_share_a_character(self):
+        async def scenario(root, merged):
+            source_root = root / "input"
+            output_root = root / "output"
+            source_root.mkdir()
+            for name in ("a.png", "b.png"):
+                (source_root / name).write_bytes(b"original")
+            first_title, second_title = ("Aurora-现代版本", "Aurora-老年版本") if merged else ("Aurora", "Cass")
+            candidates = [
+                Candidate("c1", "s1", 1, "a.png", "a.png", first_title, None, 1),
+                Candidate("c2", "s1", 2, "b.png", "b.png", second_title, None, 1),
+            ]
+            characters = (
+                (CharacterStatistics("Aurora", 2, 1, 4.0, {1: 0, 2: 0, 3: 0, 4: 1}, 1),) if merged else ()
+            )
+            statistics = SessionStatistics(
+                total_candidates=2,
+                total_valid_votes=1,
+                unique_voters=1,
+                average_votes_per_candidate=0.5,
+                overall_average_score=4.0,
+                candidates=(
+                    CandidateStatistics("c1", 1, first_title, 1, 4.0, {1: 0, 2: 0, 3: 0, 4: 1}, 1),
+                    CandidateStatistics("c2", 2, second_title, 0, None, {1: 0, 2: 0, 3: 0, 4: 0}, None),
+                ),
+                characters=characters,
+            )
+            session = Session(
+                "s1", "A7F3", "g1", "umo", "project", str(source_root), SessionStatus.COMPLETED, candidate_count=2
+            )
+            report = await DirectoryReportGenerator().generate(
+                session, candidates, statistics, source_root, output_root, FakeImageProcessor()
+            )
+            page = (report / "index.html").read_text(encoding="utf-8")
+            return page
+
+        with tempfile.TemporaryDirectory() as directory:
+            page = asyncio.run(scenario(Path(directory), True))
+            self.assertIn("角色汇总", page)
+            self.assertIn("Aurora", page)
+        with tempfile.TemporaryDirectory() as directory:
+            page = asyncio.run(scenario(Path(directory), False))
+            self.assertNotIn("角色汇总", page)
 
     def test_single_html_embeds_derivatives_and_falls_back_when_too_large(self):
         async def scenario(root):

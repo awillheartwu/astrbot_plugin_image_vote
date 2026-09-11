@@ -539,7 +539,8 @@ class VoteApplication:
                 message_id=message_id,
                 created_at=now,
                 updated_at=now,
-            )
+            ),
+            policy=self.config.same_user_vote_policy,
         )
         logger.debug(
             "记录投票：session=%s candidate=%s voter=%s score=%d source=%s",

@@ -37,6 +37,7 @@ class Candidate:
     display_title: str
     sequence_number: Optional[int]
     source_size: int
+    character: Optional[str] = None
     send_status: SendStatus = SendStatus.PENDING
     sent_at: Optional[str] = None
 
@@ -109,6 +110,16 @@ class CandidateStatistics:
 
 
 @dataclass(frozen=True)
+class CharacterStatistics:
+    character: str
+    candidate_count: int
+    vote_count: int
+    average_score: Optional[float]
+    score_distribution: Dict[int, int] = field(default_factory=dict)
+    rank: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class SessionStatistics:
     total_candidates: int
     total_valid_votes: int
@@ -116,3 +127,4 @@ class SessionStatistics:
     average_votes_per_candidate: float
     overall_average_score: Optional[float]
     candidates: Tuple[CandidateStatistics, ...]
+    characters: Tuple[CharacterStatistics, ...] = ()

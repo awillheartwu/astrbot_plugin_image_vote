@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .models import Candidate, ProjectSnapshot
 
@@ -46,18 +46,44 @@ def _candidate_id(relative_path: str, size: int, mtime_ns: int) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
-def _read_manifest(project_path: Path) -> Sequence[str]:
+def _read_manifest(project_path: Path) -> Dict[str, object]:
     manifest_path = project_path / "project.json"
     if not manifest_path.is_file():
-        return ()
+        return {}
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return ()
-    files = payload.get("files", [])
+        return {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _manifest_files(manifest: Dict[str, object]) -> Tuple[str, ...]:
+    files = manifest.get("files")
     if not isinstance(files, list):
         return ()
     return tuple(item for item in files if isinstance(item, str))
+
+
+def _manifest_characters(manifest: Dict[str, object]) -> Dict[str, str]:
+    """manifest 里的 角色名 → 文件名列表，反转成 文件名 → 角色名。"""
+    mapping = manifest.get("characters")
+    if not isinstance(mapping, dict):
+        return {}
+    by_filename: Dict[str, str] = {}
+    for character, files in mapping.items():
+        if not isinstance(character, str) or not isinstance(files, list):
+            continue
+        name = character.strip() or character
+        for item in files:
+            if isinstance(item, str):
+                by_filename[item] = name
+    return by_filename
+
+
+def derive_character(display_title: str) -> str:
+    """默认取展示标题里第一个短横线之前的部分作为角色名，贴合常见命名习惯。"""
+    head = (display_title or "").split("-")[0].strip()
+    return head or (display_title or "").strip()
 
 
 def scan_project(project_path: Path, recursive: bool = False, session_id: str = "snapshot") -> ProjectSnapshot:
@@ -87,7 +113,9 @@ def scan_project(project_path: Path, recursive: bool = False, session_id: str = 
         stat = path.stat()
         parsed.append((path, relative, title, sequence, stat.st_size, stat.st_mtime_ns))
 
-    manifest_files = _read_manifest(project_path)
+    manifest = _read_manifest(project_path)
+    manifest_files = _manifest_files(manifest)
+    character_overrides = _manifest_characters(manifest)
     manifest_order = {str(Path(item)).replace("\\", "/"): index for index, item in enumerate(manifest_files)}
     if manifest_order:
         parsed.sort(key=lambda item: (manifest_order.get(item[1], len(manifest_order)), natural_key(item[1])))
@@ -122,6 +150,7 @@ def scan_project(project_path: Path, recursive: bool = False, session_id: str = 
                 display_title=title,
                 sequence_number=sequence,
                 source_size=size,
+                character=character_overrides.get(path.name) or derive_character(title),
             )
         )
 

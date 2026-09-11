@@ -110,8 +110,10 @@ class VoteConfig:
             raise ValueError("default_interval_seconds must be positive")
         if self.final_grace_seconds < 0:
             raise ValueError("final_grace_seconds cannot be negative")
-        if self.same_user_vote_policy != "last_wins":
-            raise ValueError("only last_wins is supported in the MVP")
+        if self.same_user_vote_policy not in {"last_wins", "first_wins", "max_score", "min_score"}:
+            raise ValueError(
+                "same_user_vote_policy must be one of last_wins / first_wins / max_score / min_score"
+            )
         if self.report_mode not in {"directory", "single_html"}:
             raise ValueError("report_mode must be directory or single_html")
         if self.report_image_format.lower() not in {"webp", "jpeg", "jpg", "png"}:

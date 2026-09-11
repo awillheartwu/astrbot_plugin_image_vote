@@ -106,6 +106,17 @@ class DirectoryReportGenerator:
                 "average_votes_per_candidate": statistics.average_votes_per_candidate,
                 "overall_average_score": statistics.overall_average_score,
             },
+            "characters": [
+                {
+                    "character": item.character,
+                    "candidate_count": item.candidate_count,
+                    "vote_count": item.vote_count,
+                    "average_score": item.average_score,
+                    "score_distribution": item.score_distribution,
+                    "rank": item.rank,
+                }
+                for item in statistics.characters
+            ],
             "candidates": rows,
             "ai_summary": ai_summary,
         }
@@ -210,6 +221,28 @@ class DirectoryReportGenerator:
         session = payload["session"]
         statistics = payload["statistics"]
         rows = payload["candidates"]
+        characters = payload.get("characters") or []
+        character_section = ""
+        if characters and len(characters) < len(rows):
+            character_rows = []
+            for item in characters:
+                rank = "—" if item["rank"] is None else str(item["rank"])
+                average = "无投票" if item["average_score"] is None else "%.2f" % item["average_score"]
+                character_rows.append(
+                    "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+                    % (
+                        rank,
+                        html.escape(str(item["character"])),
+                        item["candidate_count"],
+                        item["vote_count"],
+                        average,
+                    )
+                )
+            character_section = (
+                '<section class="characters"><h2>角色汇总（同一角色的多张图合并统计）</h2>'
+                "<table><thead><tr><th>排名</th><th>角色</th><th>图片数</th><th>票数</th><th>平均分</th></tr></thead>"
+                "<tbody>%s</tbody></table></section>" % "".join(character_rows)
+            )
         cards = []
         for row in rows:
             average = "无投票" if row["average_score"] is None else "%.2f" % row["average_score"]
@@ -255,6 +288,7 @@ class DirectoryReportGenerator:
 <p class=\"meta\">开始 %s · 结束 %s</p><section class=\"summary-grid\">
 <div><strong>%s</strong><span>图片</span></div><div><strong>%s</strong><span>有效票</span></div><div><strong>%s</strong><span>参与人数</span></div><div><strong>%s</strong><span>总体平均分</span></div></section>
 <section class=\"ai-summary\"><h2>总结</h2><p>%s</p></section></header>
+%s
 <section class=\"toolbar\"><input id=\"search\" type=\"search\" placeholder=\"搜索图片名称\"><button id=\"sort\" type=\"button\">切换原始顺序</button><span class=\"hint\">默认按排名显示</span></section>
 <section id=\"candidates\" class=\"candidate-grid\">%s</section></main><script src=\"./report.js\"></script></body></html>""" % (
             html.escape(str(session["project_name"])),
@@ -271,6 +305,7 @@ class DirectoryReportGenerator:
             statistics["unique_voters"],
             "无" if statistics["overall_average_score"] is None else "%.2f" % statistics["overall_average_score"],
             html.escape(str(summary)),
+            character_section,
             "".join(cards),
         )
 

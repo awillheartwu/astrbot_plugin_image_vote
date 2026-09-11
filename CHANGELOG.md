@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0 - 2026-09-13
+
+- `same_user_vote_policy` 扩展为四种：`last_wins`（默认）、`first_wins`、`max_score`、`min_score`；语义仍是「同一用户对同一张图只保留一票」，策略只决定取值，来源与 message_id 跟随胜出的那一次。
+- 新增角色维度统计：候选带 `character`（默认取展示标题第一个短横线之前的部分），`project.json` 的 `characters` 可覆盖；统计、报告与 AI 输入都带角色合并结果。
+- 报告在发生合并时多渲染「角色汇总」表格；`/vote check` 增加角色数量行。
+- 老数据库自动为 candidates 补 `character_name` 列。
+- 测试从 71 增加到 75。
+
 ## 0.10.1 - 2026-09-13
 
 - 新增 `interval_includes_send_time`（默认关）：开启后按固定周期发送，等待时间 = max(0, 间隔 − 本张发送耗时)，消除「设置 5 秒、实测约 20 秒」的差值（差值是图片上传耗时）。

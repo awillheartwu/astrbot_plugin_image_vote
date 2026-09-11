@@ -8,6 +8,15 @@ from typing import Iterable, List, Optional
 from .models import Candidate, SendStatus, Session, SessionStatus, Vote, VoteSource
 
 
+"""同一用户对同一张图重复投票时的合并策略：SQL 片段按策略白名单拼接。"""
+VOTE_POLICIES = {
+    "last_wins": ("excluded.score", "1"),
+    "first_wins": ("votes.score", "0"),
+    "max_score": ("MAX(votes.score, excluded.score)", "CASE WHEN excluded.score >= votes.score THEN 1 ELSE 0 END"),
+    "min_score": ("MIN(votes.score, excluded.score)", "CASE WHEN excluded.score <= votes.score THEN 1 ELSE 0 END"),
+}
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -42,6 +51,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     display_title TEXT NOT NULL,
     sequence_number INTEGER,
     source_size INTEGER NOT NULL,
+    character_name TEXT,
     send_status TEXT NOT NULL,
     sent_at TEXT,
     UNIQUE(session_id, display_index)
@@ -90,14 +100,21 @@ class SQLiteStore:
     def _migrate_sync(self) -> None:
         """老库补齐新增列；CREATE TABLE IF NOT EXISTS 不会改动已存在的表。"""
         connection = self._require_connection()
-        columns = {row["name"] for row in connection.execute("PRAGMA table_info(sessions)")}
-        for name, statement in (
-            ("score_min", "ALTER TABLE sessions ADD COLUMN score_min INTEGER NOT NULL DEFAULT 1"),
-            ("score_max", "ALTER TABLE sessions ADD COLUMN score_max INTEGER NOT NULL DEFAULT 4"),
-            ("active_candidate_id", "ALTER TABLE sessions ADD COLUMN active_candidate_id TEXT"),
-        ):
-            if name not in columns:
-                connection.execute(statement)
+        additions = {
+            "sessions": (
+                ("score_min", "ALTER TABLE sessions ADD COLUMN score_min INTEGER NOT NULL DEFAULT 1"),
+                ("score_max", "ALTER TABLE sessions ADD COLUMN score_max INTEGER NOT NULL DEFAULT 4"),
+                ("active_candidate_id", "ALTER TABLE sessions ADD COLUMN active_candidate_id TEXT"),
+            ),
+            "candidates": (
+                ("character_name", "ALTER TABLE candidates ADD COLUMN character_name TEXT"),
+            ),
+        }
+        for table, columns in additions.items():
+            existing = {row["name"] for row in connection.execute("PRAGMA table_info(%s)" % table)}
+            for name, statement in columns:
+                if name not in existing:
+                    connection.execute(statement)
 
     async def close(self) -> None:
         async with self._lock:
@@ -168,8 +185,8 @@ class SQLiteStore:
         connection.executemany(
             """INSERT INTO candidates (
                 id, session_id, display_index, source_relative_path, source_filename,
-                display_title, sequence_number, source_size, send_status, sent_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                display_title, sequence_number, source_size, character_name, send_status, sent_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 send_status=excluded.send_status,
                 sent_at=excluded.sent_at""",
@@ -183,6 +200,7 @@ class SQLiteStore:
                     candidate.display_title,
                     candidate.sequence_number,
                     candidate.source_size,
+                    candidate.character,
                     candidate.send_status.value,
                     candidate.sent_at,
                 )
@@ -191,12 +209,13 @@ class SQLiteStore:
         )
         connection.commit()
 
-    async def upsert_vote(self, vote: Vote) -> None:
+    async def upsert_vote(self, vote: Vote, policy: str = "last_wins") -> None:
         async with self._lock:
-            await asyncio.to_thread(self._upsert_vote_sync, vote)
+            await asyncio.to_thread(self._upsert_vote_sync, vote, policy)
 
-    def _upsert_vote_sync(self, vote: Vote) -> None:
+    def _upsert_vote_sync(self, vote: Vote, policy: str = "last_wins") -> None:
         connection = self._require_connection()
+        score_expression, wins_expression = VOTE_POLICIES.get(policy, VOTE_POLICIES["last_wins"])
         connection.execute(
             """INSERT INTO votes (
                 session_id, candidate_id, voter_id, voter_name, score, source_type,
@@ -204,10 +223,11 @@ class SQLiteStore:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id, candidate_id, voter_id) DO UPDATE SET
                 voter_name=excluded.voter_name,
-                score=excluded.score,
-                source_type=excluded.source_type,
-                message_id=excluded.message_id,
-                updated_at=excluded.updated_at""",
+                score=%s,
+                source_type=CASE WHEN %s THEN excluded.source_type ELSE votes.source_type END,
+                message_id=CASE WHEN %s THEN excluded.message_id ELSE votes.message_id END,
+                updated_at=CASE WHEN %s THEN excluded.updated_at ELSE votes.updated_at END"""
+            % (score_expression, wins_expression, wins_expression, wins_expression),
             (
                 vote.session_id,
                 vote.candidate_id,
@@ -264,6 +284,7 @@ class SQLiteStore:
                 display_title=row["display_title"],
                 sequence_number=row["sequence_number"],
                 source_size=row["source_size"],
+                character=row["character_name"],
                 send_status=SendStatus(row["send_status"]),
                 sent_at=row["sent_at"],
             )

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,3 +56,27 @@ class ProjectScannerTest(unittest.TestCase):
             (root / "real-project").mkdir()
             (root / "project_alias.json").write_text('{"别名": "real-project"}', encoding="utf-8")
             self.assertEqual(ProjectService(root).resolve_project_path("别名"), (root / "real-project").resolve())
+
+    def test_character_is_derived_and_manifest_can_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("Aurora-现代版本.png", "Aurora-老年版本.png", "Cass-废土风格.png"):
+                (root / name).write_bytes(b"image")
+
+            snapshot = scan_project(root)
+            by_name = {item.source_filename: item.character for item in snapshot.candidates}
+            self.assertEqual(by_name["Aurora-现代版本.png"], "Aurora")
+            self.assertEqual(by_name["Aurora-老年版本.png"], "Aurora")
+            self.assertEqual(by_name["Cass-废土风格.png"], "Cass")
+
+            (root / "project.json").write_text(
+                json.dumps(
+                    {"characters": {"Cassandra": ["Cass-废土风格.png", "Aurora-老年版本.png"]}}
+                ),
+                encoding="utf-8",
+            )
+            snapshot = scan_project(root)
+            by_name = {item.source_filename: item.character for item in snapshot.candidates}
+            self.assertEqual(by_name["Cass-废土风格.png"], "Cassandra")
+            self.assertEqual(by_name["Aurora-老年版本.png"], "Cassandra")
+            self.assertEqual(by_name["Aurora-现代版本.png"], "Aurora")

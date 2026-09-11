@@ -273,11 +273,14 @@ project.json
 
 ```json
 {
-  "name": "game_b 角色投票",
-  "sort_mode": "natural",
-  "interval_seconds": 20,
-  "description": "角色图投票",
-  "files": []
+ "name": "game_b 角色投票",
+ "sort_mode": "natural",
+ "interval_seconds": 20,
+ "description": "角色图投票",
+  "files": [],
+  "characters": {
+    "Aurora": ["Aurora-现代版本.png", "Aurora-老年版本.png"]
+  }
 }
 ```
 
@@ -706,13 +709,16 @@ OneBot / AstrBot 当前适配器通常会把引用消息解析为 `Reply` 组件
 
 ### 11.5 同一用户重复投票
 
-默认策略：
+配置项 `same_user_vote_policy`，可选值：
 
 ```text
-last_vote_wins
+last_wins   最后一次生效（默认）
+first_wins  保留最早一次
+max_score   取最高分
+min_score   取最低分
 ```
 
-即同一用户对同一 candidate 再次投票时更新旧值，而不是增加一票。
+语义统一为「同一用户对同一 candidate 只保留一票」，四个策略只决定这一票如何取值；后到的投票不会增加票数。`last_wins` 覆盖旧值，`first_wins` 保留首次的分数与来源，`max_score` / `min_score` 取更高或更低分，来源与 message_id 跟随胜出的那一次，`updated_at` 仅在真的发生变化时更新。
 
 数据库唯一键：
 
@@ -968,6 +974,16 @@ overall_average_score
 1. `average_score` 降序；
 2. 同分时 `vote_count` 降序；
 3. 再同分时 `display_index` 升序。
+
+### 16.2 角色维度统计
+
+一个项目里可能有多张图属于同一个人物，因此除按图统计外，再做一份按角色的合并统计：同一角色的所有图片的票合并计算 `vote_count`、`average_score`、`score_distribution`，并给出角色排名（规则同 §16.1，同分按角色名）。
+
+角色归属规则：
+
+1. 默认取展示标题里第一个短横线之前的部分（`Aurora-现代版本` → `Aurora`、`Azalia-Isis和Elis的女儿` → `Azalia`）；
+2. 项目目录的 `project.json` 可以用 `characters` 显式覆盖：`{"角色名": ["文件名", ...]}`，未列出的文件仍走默认规则；
+3. 投票与单图排名不变，角色统计只是额外的一份视图；当角色数与图片数相同（没有合并发生时）报告不显示该区块。
 
 必须明确：
 

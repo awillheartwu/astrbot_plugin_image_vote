@@ -36,4 +36,8 @@ button { cursor: pointer; }
 .distribution { color: var(--muted); font-size: 14px; }
 .send-failed { color: #d9480f; font-weight: 700; font-size: 14px; }
 .hint { align-self: center; color: var(--muted); font-size: 13px; }
+.characters { margin: 24px 0; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.characters table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+.characters th, .characters td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line); }
+.characters th { color: var(--muted); font-weight: 600; }
 @media (max-width: 640px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } .candidate-card { grid-template-columns: 1fr; } .candidate-card img { width: 100%; height: auto; max-height: 300px; } }

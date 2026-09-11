@@ -36,6 +36,10 @@ def build_summary_statistics(
         (item for item in ranked if item.vote_count >= 2),
         key=lambda item: (-score_std_dev(item.score_distribution), item.display_index),
     )[:3]
+    top_characters = sorted(
+        (item for item in statistics.characters if item.vote_count > 0),
+        key=lambda item: (item.rank or 9999, item.character),
+    )[:top_n]
     return {
         "project": project_name,
         "score_min": score_min,
@@ -59,6 +63,15 @@ def build_summary_statistics(
                 "votes": item.vote_count,
             }
             for item in disagreement
+        ],
+        "characters": [
+            {
+                "name": item.character,
+                "avg": item.average_score,
+                "votes": item.vote_count,
+                "images": item.candidate_count,
+            }
+            for item in top_characters
         ],
     }
 

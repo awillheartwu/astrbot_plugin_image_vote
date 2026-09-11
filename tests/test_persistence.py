@@ -94,3 +94,45 @@ class PersistenceTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory) / "vote.db"))
+
+    def test_vote_policies(self):
+        cases = [
+            ("last_wins", 2, 4, 4, VoteSource.QUOTED_REPLY),
+            ("first_wins", 2, 4, 2, VoteSource.CURRENT_WINDOW),
+            ("max_score", 2, 4, 4, VoteSource.QUOTED_REPLY),
+            ("max_score", 4, 2, 4, VoteSource.CURRENT_WINDOW),
+            ("min_score", 2, 4, 2, VoteSource.CURRENT_WINDOW),
+            ("min_score", 4, 2, 2, VoteSource.QUOTED_REPLY),
+        ]
+
+        async def scenario(database_path):
+            store = SQLiteStore(database_path)
+            await store.initialize()
+            for index, (policy, first, second, expected, expected_source) in enumerate(cases):
+                session_id = "s%d" % index
+                candidate_id = "c%d" % index
+                await store.save_session(
+                    Session(
+                        session_id, "A7F3", "g1", "umo", "p", "/tmp/p",
+                        SessionStatus.RUNNING, candidate_count=1,
+                    )
+                )
+                await store.save_candidates(
+                    [Candidate(candidate_id, session_id, 1, "one.png", "one.png", "One", None, 1)]
+                )
+                await store.upsert_vote(
+                    Vote(None, session_id, candidate_id, "u1", "n", first, VoteSource.CURRENT_WINDOW),
+                    policy=policy,
+                )
+                await store.upsert_vote(
+                    Vote(None, session_id, candidate_id, "u1", "n", second, VoteSource.QUOTED_REPLY),
+                    policy=policy,
+                )
+                votes = await store.list_votes(session_id)
+                self.assertEqual(len(votes), 1, policy)
+                self.assertEqual(votes[0].score, expected, "%s: %s→%s" % (policy, first, second))
+                self.assertEqual(votes[0].source_type, expected_source, policy)
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "vote.db"))

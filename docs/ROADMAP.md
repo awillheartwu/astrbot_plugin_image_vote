@@ -181,3 +181,9 @@
 - 新增 `interval_includes_send_time`（默认 false）：开启后按固定周期发送，等待时间 = max(0, 间隔 − 本张发送耗时)，解决「设 5 秒、实测 20 秒」的预期差（差值是图片上传耗时）。
 - 发送阶段新增耗时统计：DEBUG 记录每张耗时，耗时超过设定间隔时打 WARNING 并提示可开启周期模式。
 - 单文件报告成功后删除 `report.css`、`report.js` 与 `images/`，报告目录只留 `index.html`、`data.json` 与 marker，避免被误认为目录模式。
+
+## 十五、已完成：重复投票策略与角色合并统计（2026-09-13）
+
+- `same_user_vote_policy` 扩展为四种：`last_wins`（默认）、`first_wins`、`max_score`、`min_score`；统一语义是「同一用户对同一张图只保留一票」，策略只决定取值，来源与 message_id 跟随胜出的那一次，`updated_at` 仅在实际变化时更新。
+- 新增角色维度统计：候选新增 `character` 字段（默认取展示标题第一个短横线之前的部分），`project.json` 的 `characters` 可显式覆盖；统计、报告与 AI 输入都带上角色合并结果。
+- 报告在「角色数 < 图片数」时多渲染一个「角色汇总」表格；`/vote check` 增加角色数量行。

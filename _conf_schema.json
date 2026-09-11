@@ -62,9 +62,9 @@
       "same_user_vote_policy": {
         "description": "同一用户重复投票策略",
         "type": "string",
-        "options": ["last_wins"],
+        "options": ["last_wins", "first_wins", "max_score", "min_score"],
         "default": "last_wins",
-        "hint": "当前版本只支持 last_wins：同一用户对同一张图重复投票时覆盖旧值。"
+        "hint": "last_wins 最后一次生效；first_wins 保留最早一次；max_score 取最高分；min_score 取最低分。"
       },
       "allow_quoted_vote_after_window": {
         "description": "允许引用旧图补票",

@@ -66,7 +66,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-13.2"
+BUILD = "2026-09-13.3"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -81,7 +81,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.10.1",
+    "0.11.0",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -552,10 +552,15 @@ class ImageVotePlugin(Star):
     def _check_text(self, snapshot, project_name: str = "") -> str:
         numbered = sum(1 for item in snapshot.candidates if item.sequence_number is not None)
         plain = len(snapshot.candidates) - numbered
+        character_names = {item.character or item.display_title for item in snapshot.candidates}
+        character_line = "角色：%d 个" % len(character_names)
+        if len(character_names) < len(snapshot.candidates):
+            character_line += "（有多张图属于同一角色，报告里会额外给一份合并统计）"
         lines = [
             "项目：%s" % snapshot.project_name,
             "路径：%s" % self._project_path_label(snapshot.project_path, project_name),
             "图片：%d（带序号 %d，普通命名 %d）" % (len(snapshot.candidates), numbered, plain),
+            character_line,
             "原始总大小：%.1f MB" % (snapshot.total_size / (1024.0 * 1024.0)),
             "排序方式：%s" % snapshot.sort_mode,
             "评分范围：%d-%d" % (self.settings.score_min, self.settings.score_max),
@@ -661,6 +666,7 @@ class ImageVotePlugin(Star):
             "发送间隔：%d 秒\n"
             "最后一张额外等待：%d 秒\n"
             "评分范围：%d-%d\n"
+            "重复投票：%s\n"
             "报告模式：%s（单文件上限 %d MB）\n"
             "结束提醒：%s · 自动报告：%s · 报告发群：%s\n"
             "AI 总结：%s"
@@ -670,6 +676,7 @@ class ImageVotePlugin(Star):
                 settings.effective_final_grace_seconds,
                 settings.score_min,
                 settings.score_max,
+                settings.same_user_vote_policy,
                 settings.report_mode,
                 settings.single_html_max_mb,
                 "开" if settings.notify_on_finish else "关",

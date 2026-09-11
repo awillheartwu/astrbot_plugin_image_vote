@@ -534,6 +534,8 @@ FINALIZING
 COMPLETED
 ```
 
+间隔语义：默认 `interval_includes_send_time = false`，即「上一张发送完成后等待 `interval_seconds` 秒」，因此实际出图间隔 = 图片上传耗时 + 间隔，大图会明显拉长；开启后改为周期制，等待时间 = `max(0, interval_seconds - 本张发送耗时)`，节奏更接近设定值。最后一张仍按 `final_grace_seconds` 等待。
+
 ---
 
 ## 10. 图片发送格式
@@ -1164,6 +1166,8 @@ single_html_max_mb = 50
 
 单文件报告可以通过 `send_report_html` 配置在结束时作为附件发到投票群；目录模式不发送文件，报告仍在 `output_root` 下。
 
+单文件模式成功内嵌后会删除 `report.css`、`report.js` 与 `images/`（这些是目录模式的附属产物），报告目录里只保留 `index.html`、`data.json` 与 marker，`data.json` 里会写明 `report_mode = single_html`。
+
 ---
 
 ## 18.4 输出目录可指定
@@ -1347,6 +1351,7 @@ recursive_scan: bool = false
 
 ```text
 default_interval_seconds: int = 20
+interval_includes_send_time: bool = false
 final_grace_seconds: int = 20
 score_min: int = 1
 score_max: int = 4

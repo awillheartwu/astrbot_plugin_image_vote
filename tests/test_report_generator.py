@@ -152,6 +152,10 @@ class ReportGeneratorTest(unittest.TestCase):
             report = DirectoryReportGenerator().generate_single_html
             small = await report(session, [candidate], statistics, source_root, output_root, FakeImageProcessor(), 1)
             self.assertIn("data:image/webp;base64", (small / "index.html").read_text(encoding="utf-8"))
+            self.assertFalse((small / "images").exists())
+            self.assertFalse((small / "report.css").exists())
+            self.assertFalse((small / "report.js").exists())
+            self.assertIn('"report_mode": "single_html"', (small / "data.json").read_text(encoding="utf-8"))
             fallback = await DirectoryReportGenerator().generate_single_html(
                 session, [candidate], statistics, source_root, output_root, FakeImageProcessor(), 0
             )

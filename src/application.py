@@ -164,6 +164,7 @@ class VoteApplication:
                 source_path = PathGuard(Path(session.project_path)).ensure_within(
                     Path(session.project_path) / candidate.source_relative_path, allow_root=False
                 )
+                started_at = asyncio.get_event_loop().time()
                 try:
                     await self.sender(session, candidate, source_path)
                     candidate.send_status = SendStatus.SENT
@@ -188,6 +189,20 @@ class VoteApplication:
                         consecutive_failures,
                         exc,
                     )
+                elapsed = asyncio.get_event_loop().time() - started_at
+                logger.debug(
+                    "session %s 第 %d 张发送耗时 %.1f 秒", session.short_id, candidate.display_index, elapsed
+                )
+                is_last = index == len(candidates) - 1
+                if not is_last and elapsed > session.interval_seconds:
+                    logger.warning(
+                        "session %s 第 %d 张发送耗时 %.1f 秒，超过设定间隔 %d 秒；默认语义下实际出图间隔为两者之和，"
+                        "需要严格周期可开启 interval_includes_send_time",
+                        session.short_id,
+                        candidate.display_index,
+                        elapsed,
+                        session.interval_seconds,
+                    )
                 session.current_index = index + 1
                 await self.store.save_candidates([candidate])
                 await self.store.save_session(session)
@@ -200,8 +215,7 @@ class VoteApplication:
                     return
                 if control.finish_requested:
                     break
-                wait_seconds = session.final_grace_seconds if index == len(candidates) - 1 else session.interval_seconds
-                await control.wait_for_interval(wait_seconds)
+                await control.wait_for_interval(self._next_wait_seconds(session, is_last, elapsed))
 
             session.status = SessionStatus.FINALIZING
             session.finished_at = utc_now()
@@ -442,6 +456,14 @@ class VoteApplication:
             self.config.score_min,
             self.config.score_max,
         )
+
+    def _next_wait_seconds(self, session: Session, is_last: bool, elapsed: float) -> int:
+        """下一张之前的等待时间。周期模式下把本张的发送耗时从间隔里扣掉。"""
+        if is_last:
+            return session.final_grace_seconds
+        if self.config.interval_includes_send_time:
+            return max(0, int(round(session.interval_seconds - elapsed)))
+        return session.interval_seconds
 
     async def _heal_project_name(self, session: Session) -> None:
         """老会话可能存的是文件夹名；若路径已在登记表里，改用登记名，报告目录随之统一。"""

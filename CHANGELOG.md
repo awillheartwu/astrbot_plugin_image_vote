@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.1 - 2026-09-13
+
+- 新增 `interval_includes_send_time`（默认关）：开启后按固定周期发送，等待时间 = max(0, 间隔 − 本张发送耗时)，消除「设置 5 秒、实测约 20 秒」的差值（差值是图片上传耗时）。
+- 每张图片发送耗时写入 DEBUG 日志；耗时超过设定间隔时打 WARNING 并提示可开启周期模式。
+- 单文件报告成功后清理 `report.css`、`report.js` 与 `images/`，报告目录只保留 `index.html`、`data.json` 与 marker。
+- 测试从 70 增加到 71。
+
 ## 0.10.0 - 2026-09-13
 
 - 修复「WebUI 里改了发送间隔 / 报告模式但没生效」：配置解析优先读 `astrbot_config_mgr` 与磁盘上的插件配置文件（WebUI 保存后即更新），过期来源排在后面；文件按 (mtime, size) 缓存，下一条指令生效。

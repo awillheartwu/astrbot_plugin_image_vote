@@ -162,7 +162,19 @@ class DirectoryReportGenerator:
         payload["report_mode"] = "single_html"
         data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         (report_dir / "index.html").write_text(standalone_html, encoding="utf-8")
+        self._remove_directory_only_assets(report_dir)
         return report_dir
+
+    @staticmethod
+    def _remove_directory_only_assets(report_dir: Path) -> None:
+        """单文件模式已把图片内嵌进 index.html，清掉目录模式的附属文件，避免看起来像目录报告。"""
+        for name in ("report.css", "report.js"):
+            target = report_dir / name
+            if target.is_file():
+                target.unlink()
+        images = report_dir / "images"
+        if images.is_dir():
+            shutil.rmtree(str(images), ignore_errors=True)
 
     @staticmethod
     def _data_uri(path: Path) -> str:

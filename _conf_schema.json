@@ -32,7 +32,14 @@
       "default_interval_seconds": {
         "description": "每张图发送间隔（秒）",
         "type": "int",
-        "default": 20
+        "default": 20,
+        "hint": "默认含义是「上一张发送完成后再等这么多秒」；开启下面的周期模式后，它表示「每张图之间的总周期」。"
+      },
+      "interval_includes_send_time": {
+        "description": "按固定周期发送（发送耗时计入间隔）",
+        "type": "bool",
+        "default": false,
+        "hint": "关闭时：实际出图间隔 = 发送耗时 + 间隔秒数（大图上传慢时会明显拉长）。开启时：间隔按周期计算，等待时间 = max(0, 间隔 − 发送耗时)，出图节奏更接近设定值；最后一张仍按 final_grace_seconds 等待。"
       },
       "final_grace_seconds": {
         "description": "最后一张图的额外等待（秒）",

@@ -39,6 +39,7 @@ DEFAULT_CONFIG = {
     "notify_on_finish": True,
     "auto_report_on_finish": True,
     "send_report_html": False,
+    "interval_includes_send_time": False,
 }
 
 
@@ -89,6 +90,7 @@ class VoteConfig:
     notify_on_finish: bool = True
     auto_report_on_finish: bool = True
     send_report_html: bool = False
+    interval_includes_send_time: bool = False
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "VoteConfig":

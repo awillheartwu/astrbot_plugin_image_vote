@@ -445,6 +445,29 @@ class ApplicationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
+    def test_next_wait_seconds_modes(self):
+        async def scenario():
+            base = VoteConfig.from_mapping({"input_root": "/a", "output_root": "/b"})
+            application = VoteApplication(base, ProjectService(Path("/a")), None, SessionManager(), VoteRouter())
+            session = Session(
+                "s1", "A1B2C3D4", "g1", "umo", "demo", "/tmp/demo", SessionStatus.RUNNING,
+                interval_seconds=5, final_grace_seconds=20,
+            )
+            self.assertEqual(application._next_wait_seconds(session, False, 17.0), 5)
+            self.assertEqual(application._next_wait_seconds(session, True, 17.0), 20)
+
+            periodic = VoteConfig.from_mapping(
+                {"input_root": "/a", "output_root": "/b", "interval_includes_send_time": True}
+            )
+            periodic_app = VoteApplication(
+                periodic, ProjectService(Path("/a")), None, SessionManager(), VoteRouter()
+            )
+            self.assertEqual(periodic_app._next_wait_seconds(session, False, 3.0), 2)
+            self.assertEqual(periodic_app._next_wait_seconds(session, False, 17.0), 0)
+            self.assertEqual(periodic_app._next_wait_seconds(session, True, 17.0), 20)
+
+        asyncio.run(scenario())
+
     def test_registered_project_name_is_used_for_session(self):
         async def scenario(root):
             input_root = root / "projects"

@@ -230,16 +230,30 @@ class VoteApplication:
                     logger.warning("session %s AI 总结为空，继续按纯统计生成报告", session.short_id)
             session.status = SessionStatus.COMPLETED
             await self.store.save_session(session)
-            if self.report_generator is not None and self.image_processor is not None:
+            report_enabled = (
+                self.config.auto_report_on_finish
+                and self.report_generator is not None
+                and self.image_processor is not None
+            )
+            if self.config.notify_on_finish:
+                await self._notify_finish(session, statistics, report_enabled)
+            if report_enabled:
                 try:
                     report_path = await self._generate_report(session, candidates, statistics)
                     session.output_path = str(report_path)
                     await self.store.save_session(session)
                     logger.info("session %s 报告已生成：%s", session.short_id, report_path)
+                    if self.config.notify_on_finish:
+                        await self._notify(
+                            session.umo,
+                            "报告已生成：%s/%s" % (report_path.parent.name, report_path.name),
+                        )
                 except Exception as exc:
                     session.error_message = "report generation failed: %s" % exc
                     await self.store.save_session(session)
                     logger.error("session %s 报告生成失败，可用 /vote export 重试：%s", session.short_id, exc)
+                    if self.config.notify_on_finish:
+                        await self._notify(session.umo, "报告生成失败，可由管理员执行 /vote export 重试。")
         except asyncio.CancelledError:
             if control.stop_requested:
                 await self._cancel_session(session)
@@ -276,16 +290,33 @@ class VoteApplication:
         session.error_message = "%d consecutive send failures" % failures
         await self.store.save_session(session)
         logger.error("session %s 连续 %d 张发送失败，已自动暂停", session.short_id, failures)
+        await self._notify(
+            session.umo,
+            "投票已自动暂停：连续 %d 张图片发送失败。请检查机器人状态，由管理员执行 /vote resume 继续。" % failures,
+        )
+
+    async def _notify(self, umo: str, text: str) -> None:
         if self.notifier is None:
             return
         try:
-            await self.notifier(
-                session.umo,
-                "投票已自动暂停：连续 %d 张图片发送失败。请检查机器人状态，由管理员执行 /vote resume 继续。"
-                % failures,
-            )
+            await self.notifier(umo, text)
         except Exception as exc:
-            logger.warning("自动暂停通知发送失败：%s", exc)
+            logger.warning("通知发送失败：%s", exc)
+
+    async def _notify_finish(self, session: Session, statistics, report_enabled: bool) -> None:
+        hint = "报告生成中，完成后会再提示一次。" if report_enabled else "报告未生成，需要时执行 /vote export。"
+        await self._notify(
+            session.umo,
+            "投票结束：%s\n图片：%d 张（已发送 %d 张）\n有效票：%d，参与人数：%d\n%s"
+            % (
+                session.project_name,
+                session.candidate_count,
+                session.current_index,
+                statistics.total_valid_votes,
+                statistics.unique_voters,
+                hint,
+            ),
+        )
 
     async def recover_incomplete_sessions(self) -> None:
         for session in await self.store.list_incomplete_sessions():

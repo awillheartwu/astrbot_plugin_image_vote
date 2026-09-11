@@ -456,6 +456,7 @@ class ApplicationTest(unittest.TestCase):
                     "input_root": str(input_root),
                     "output_root": str(root / "reports"),
                     "send_failure_pause_threshold": 2,
+                    "notify_on_finish": False,
                 }
             )
             store = SQLiteStore(root / "state" / "vote.db")
@@ -549,9 +550,85 @@ class ApplicationTest(unittest.TestCase):
             persisted = await store.get_session(session.id)
             self.assertEqual(persisted.status, SessionStatus.COMPLETED)
             self.assertEqual(persisted.current_index, 3)
-            self.assertEqual(notified, [])
+            self.assertFalse(any("自动暂停" in text for text in notified))
             await store.close()
 
         notified = []
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory), notified))
+
+    def test_finish_notification_and_auto_report_toggles(self):
+        class RecordingGenerator:
+            def __init__(self):
+                self.calls = 0
+
+            async def generate(
+                self, session, candidates, statistics, source_root, output_root, image_processor, ai_summary=None
+            ):
+                self.calls += 1
+                return Path(output_root) / "report"
+
+        async def scenario(root, notified, generator, config_extra):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            (project_root / "one.png").write_bytes(b"x")
+            values = {"input_root": str(input_root), "output_root": str(root / "reports")}
+            values.update(config_extra)
+            config = VoteConfig.from_mapping(values)
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+
+            async def sender(session, candidate, image_path):
+                return None
+
+            async def notifier(umo, text):
+                notified.append(text)
+
+            application = VoteApplication(
+                config,
+                ProjectService(input_root),
+                store,
+                SessionManager(),
+                VoteRouter(),
+                sender=sender,
+                notifier=notifier,
+                report_generator=generator,
+                image_processor=object(),
+            )
+            session = await application.prepare_session("g1", "umo", "demo")
+            session.interval_seconds = 0
+            session.final_grace_seconds = 0
+            candidates = await store.list_candidates(session.id)
+
+            async def runner(current_session, control):
+                await application.run_session(current_session, candidates, control)
+
+            await application.sessions.start(session, runner)
+            managed = await application.sessions.active_for_group("g1")
+            await asyncio.wait_for(managed.task, timeout=2)
+            await store.close()
+
+        notified = []
+        generator = RecordingGenerator()
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory), notified, generator, {}))
+        self.assertEqual(len(notified), 2)
+        self.assertIn("投票结束", notified[0])
+        self.assertIn("报告已生成", notified[1])
+        self.assertEqual(generator.calls, 1)
+
+        notified = []
+        generator = RecordingGenerator()
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory), notified, generator, {"auto_report_on_finish": False}))
+        self.assertEqual(len(notified), 1)
+        self.assertIn("报告未生成", notified[0])
+        self.assertEqual(generator.calls, 0)
+
+        notified = []
+        generator = RecordingGenerator()
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory), notified, generator, {"notify_on_finish": False}))
+        self.assertEqual(notified, [])
+        self.assertEqual(generator.calls, 1)

@@ -1372,6 +1372,17 @@ ai_top_n: int = 5
 ai_bottom_n: int = 3
 ```
 
+### 结束通知与自动报告
+
+```text
+notify_on_finish: bool = true
+auto_report_on_finish: bool = true
+```
+
+- `notify_on_finish`：结束时在投票群发一条提醒，内容包含项目名、图片数（含已发送张数）、有效票与参与人数；报告生成成功或失败时会再补一条。默认开启。
+- `auto_report_on_finish`：结束时自动生成报告。关闭后会话照常结束但不生成报告，需要时由管理员执行 `/vote export`；大项目可以先关掉，挑合适的时间手动导出。默认开启。
+- 这两个开关只影响收尾行为，不影响计票与持久化。
+
 ### 恢复/清理
 
 ```text

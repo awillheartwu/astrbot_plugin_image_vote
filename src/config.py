@@ -36,6 +36,8 @@ DEFAULT_CONFIG = {
     "max_send_retries": 3,
     "send_retry_base_seconds": 2,
     "send_failure_pause_threshold": 3,
+    "notify_on_finish": True,
+    "auto_report_on_finish": True,
 }
 
 
@@ -83,6 +85,8 @@ class VoteConfig:
     max_send_retries: int = 3
     send_retry_base_seconds: int = 2
     send_failure_pause_threshold: int = 3
+    notify_on_finish: bool = True
+    auto_report_on_finish: bool = True
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "VoteConfig":

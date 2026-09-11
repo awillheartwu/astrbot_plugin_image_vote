@@ -54,6 +54,7 @@ SQLiteStore = _persistence_module.SQLiteStore
 ProjectService = _project_service_module.ProjectService
 ProjectRegistry = _project_registry_module.ProjectRegistry
 SessionManager = _session_manager_module.SessionManager
+SessionNotFoundError = _session_manager_module.SessionNotFoundError
 VoteParser = _vote_collector_module.VoteParser
 VoteRouter = _vote_collector_module.VoteRouter
 MessageSender = _message_sender_module.MessageSender
@@ -65,7 +66,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-12.5"
+BUILD = "2026-09-12.6"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -80,7 +81,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.9.0",
+    "0.9.1",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -295,9 +296,14 @@ class ImageVotePlugin(Star):
                 return
             try:
                 session = await getattr(self.application, command)(group_id)
-                yield self._plain_result(event, "Session %s：%s" % (session.short_id, session.status.value))
+                yield self._plain_result(event, self._control_reply(command, session))
+            except SessionNotFoundError:
+                yield self._plain_result(event, "当前群没有进行中的投票。")
             except Exception as exc:
-                yield self._plain_result(event, "操作失败：%s" % exc)
+                if "no recoverable paused session" in str(exc):
+                    yield self._plain_result(event, "当前群没有可恢复的投票。")
+                else:
+                    yield self._plain_result(event, "操作失败：%s" % exc)
             return
         if command == "status":
             yield self._plain_result(event, await self._status_text(group_id))
@@ -454,6 +460,30 @@ class ImageVotePlugin(Star):
         if 0 < session.current_index <= len(candidates):
             return candidates[session.current_index - 1]
         return None
+
+    @staticmethod
+    def _control_reply(command: str, session) -> str:
+        """控制指令的确认回复：让人一眼看出触发了什么、当前进度和下一步。"""
+        head = {
+            "pause": "已暂停",
+            "resume": "已继续",
+            "finish": "已请求提前结束",
+            "stop": "已取消本次投票",
+        }.get(command, "已执行 %s" % command)
+        lines = [
+            "%s：%s" % (head, session.project_name),
+            "进度：%d / %d" % (session.current_index, session.candidate_count),
+        ]
+        if command == "pause":
+            lines.append("倒计时已冻结，已发出的图片仍可引用投票；执行 /vote resume 继续。")
+        elif command == "resume":
+            lines.append("从第 %d 张接着发送，不重发已发送的图片。" % min(session.current_index + 1, session.candidate_count))
+        elif command == "finish":
+            lines.append("将立即停止后续发送，按现有票数结算并生成报告。")
+        elif command == "stop":
+            lines.append("已收到的投票保留，不会自动生成报告；需要时执行 /vote export。")
+        lines.append("Session：%s · 状态：%s" % (session.short_id, session.status.value))
+        return "\n".join(lines)
 
     def _relative_output_path(self, path):
         try:

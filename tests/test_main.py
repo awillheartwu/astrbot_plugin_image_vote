@@ -60,6 +60,9 @@ class AdminEvent(FakeEvent):
     def is_admin(self):
         return True
 
+    def get_group_id(self):
+        return "g1"
+
 
 class MainTest(unittest.TestCase):
     def test_command_parser_preserves_project_name_spaces(self):
@@ -138,3 +141,38 @@ class MainTest(unittest.TestCase):
             self.assertIsNone(await plugin.on_group_message(SelfMessageEvent()))
 
         asyncio.run(scenario())
+
+    def test_control_replies_describe_the_action(self):
+        session = Session(
+            "s1", "A1B2C3D4", "g1", "umo", "海滨之家", "/pictures/x", SessionStatus.RUNNING,
+            candidate_count=19, current_index=7,
+        )
+        paused = ImageVotePlugin._control_reply("pause", session)
+        self.assertIn("已暂停：海滨之家", paused)
+        self.assertIn("进度：7 / 19", paused)
+        self.assertIn("/vote resume", paused)
+        self.assertIn("状态：RUNNING", paused)
+
+        resumed = ImageVotePlugin._control_reply("resume", session)
+        self.assertIn("已继续：海滨之家", resumed)
+        self.assertIn("从第 8 张接着发送", resumed)
+
+        finished = ImageVotePlugin._control_reply("finish", session)
+        self.assertIn("已请求提前结束", finished)
+        self.assertIn("按现有票数结算", finished)
+
+        stopped = ImageVotePlugin._control_reply("stop", session)
+        self.assertIn("已取消本次投票", stopped)
+        self.assertIn("/vote export", stopped)
+
+    def test_control_command_without_session_replies_clearly(self):
+        async def scenario(root):
+            plugin = ImageVotePlugin(TempContext(root))
+            await plugin.store.initialize()
+            replies = [item async for item in plugin.vote_command(AdminEvent("/vote pause"))]
+            self.assertIn("当前群没有进行中的投票", replies[0])
+            replies = [item async for item in plugin.vote_command(AdminEvent("/vote resume"))]
+            self.assertIn("可恢复", replies[0])
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))

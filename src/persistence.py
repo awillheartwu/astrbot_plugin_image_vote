@@ -120,6 +120,7 @@ class SQLiteStore:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
+                project_name=excluded.project_name,
                 interval_seconds=excluded.interval_seconds,
                 final_grace_seconds=excluded.final_grace_seconds,
                 score_min=excluded.score_min,

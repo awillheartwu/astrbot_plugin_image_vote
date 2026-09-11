@@ -5,7 +5,7 @@ from pathlib import Path
 
 from src.application import VoteApplication
 from src.config import VoteConfig
-from src.models import SessionStatus
+from src.models import Session, SessionStatus
 from src.persistence import SQLiteStore
 from src.project_service import ProjectService
 from src.project_registry import ProjectRegistry
@@ -465,6 +465,36 @@ class ApplicationTest(unittest.TestCase):
             session = await application.prepare_session("g1", "umo", "海滨之家")
             self.assertEqual(session.project_name, "海滨之家")
             self.assertEqual(Path(session.project_path), outside.resolve())
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_old_session_project_name_is_healed_from_registry(self):
+        async def scenario(root):
+            input_root = root / "projects"
+            input_root.mkdir(parents=True)
+            outside = root / "08_SLG" / "00XX_海滨之家" / "人物图"
+            outside.mkdir(parents=True)
+            registry = ProjectRegistry(root / "projects.json")
+            registry.register("海滨之家", outside)
+            config = VoteConfig.from_mapping(
+                {"input_root": str(input_root), "output_root": str(root / "reports")}
+            )
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            application = VoteApplication(
+                config, ProjectService(input_root, registry=registry), store, SessionManager(), VoteRouter()
+            )
+            legacy = Session(
+                "s1", "A1B2C3D4", "g1", "umo", "人物图", str(outside.resolve()),
+                SessionStatus.PAUSED, candidate_count=1,
+            )
+            await store.save_session(legacy)
+
+            await application._heal_project_name(legacy)
+            self.assertEqual(legacy.project_name, "海滨之家")
+            self.assertEqual((await store.get_session("s1")).project_name, "海滨之家")
             await store.close()
 
         with tempfile.TemporaryDirectory() as directory:

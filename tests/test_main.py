@@ -151,7 +151,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("已暂停：海滨之家", paused)
         self.assertIn("进度：7 / 19", paused)
         self.assertIn("/vote resume", paused)
-        self.assertIn("状态：RUNNING", paused)
+        self.assertIn("项目：海滨之家 · Session：A1B2C3D4 · 状态：RUNNING", paused)
 
         resumed = ImageVotePlugin._control_reply("resume", session)
         self.assertIn("已继续：海滨之家", resumed)

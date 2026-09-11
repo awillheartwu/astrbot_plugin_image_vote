@@ -66,7 +66,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-12.7"
+BUILD = "2026-09-12.8"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -81,7 +81,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.9.2",
+    "0.9.3",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -482,7 +482,9 @@ class ImageVotePlugin(Star):
             lines.append("将立即停止后续发送，按现有票数结算并生成报告。")
         elif command == "stop":
             lines.append("已收到的投票保留，不会自动生成报告；需要时执行 /vote export。")
-        lines.append("Session：%s · 状态：%s" % (session.short_id, session.status.value))
+        lines.append(
+            "项目：%s · Session：%s · 状态：%s" % (session.project_name, session.short_id, session.status.value)
+        )
         return "\n".join(lines)
 
     def _relative_output_path(self, path):

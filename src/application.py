@@ -137,6 +137,7 @@ class VoteApplication:
         await self.sessions.start(session, runner)
 
     async def run_session(self, session: Session, candidates: Sequence[Candidate], control) -> None:
+        await self._heal_project_name(session)
         session.status = SessionStatus.RUNNING
         session.started_at = session.started_at or utc_now()
         await self.store.save_session(session)
@@ -381,6 +382,7 @@ class VoteApplication:
         session = await self.store.latest_session_for_group(group_id)
         if session is None or session.status not in {SessionStatus.COMPLETED, SessionStatus.CANCELLED}:
             raise RuntimeError("no completed or cancelled session can be exported")
+        await self._heal_project_name(session)
         candidates = await self.store.list_candidates(session.id)
         votes = await self.store.list_votes(session.id)
         statistics = calculate_statistics(
@@ -422,6 +424,27 @@ class VoteApplication:
             self.config.score_min,
             self.config.score_max,
         )
+
+    async def _heal_project_name(self, session: Session) -> None:
+        """老会话可能存的是文件夹名；若路径已在登记表里，改用登记名，报告目录随之统一。"""
+        registry = getattr(self.projects, "registry", None)
+        if registry is None:
+            return
+        matched = None
+        for name in registry.names():
+            try:
+                if registry.resolve(name) == Path(session.project_path):
+                    matched = name
+                    break
+            except Exception:
+                continue
+        if matched is None or matched == session.project_name:
+            return
+        logger.info(
+            "会话 %s 的项目名从 %s 更正为登记名 %s", session.short_id, session.project_name, matched
+        )
+        session.project_name = matched
+        await self.store.save_session(session)
 
     async def _generate_report(self, session: Session, candidates: Sequence[Candidate], statistics) -> Path:
         if self.config.report_mode == "single_html" and hasattr(self.report_generator, "generate_single_html"):

@@ -425,3 +425,133 @@ class ApplicationTest(unittest.TestCase):
         recorded = RecordingGenerator()
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory), recorded))
+
+    def test_session_short_id_has_eight_hex_chars(self):
+        async def scenario(root):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            (project_root / "one.png").write_bytes(b"x")
+            config = VoteConfig.from_mapping({"input_root": str(input_root), "output_root": str(root / "reports")})
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            application = VoteApplication(config, ProjectService(input_root), store, SessionManager(), VoteRouter())
+            session = await application.prepare_session("g1", "umo", "demo")
+            self.assertEqual(len(session.short_id), 8)
+            self.assertTrue(all(char in "0123456789ABCDEF" for char in session.short_id))
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_consecutive_send_failures_pause_and_notify(self):
+        async def scenario(root, notified):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            for name in ("one.png", "two.png", "three.png", "four.png", "five.png"):
+                (project_root / name).write_bytes(b"x")
+            config = VoteConfig.from_mapping(
+                {
+                    "input_root": str(input_root),
+                    "output_root": str(root / "reports"),
+                    "send_failure_pause_threshold": 2,
+                }
+            )
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+
+            async def sender(session, candidate, image_path):
+                if candidate.display_index >= 3:
+                    raise RuntimeError("send failed")
+
+            async def notifier(umo, text):
+                notified.append((umo, text))
+
+            application = VoteApplication(
+                config,
+                ProjectService(input_root),
+                store,
+                SessionManager(),
+                VoteRouter(),
+                sender=sender,
+                notifier=notifier,
+            )
+            session = await application.prepare_session("g1", "umo", "demo")
+            session.interval_seconds = 0
+            session.final_grace_seconds = 0
+            candidates = await store.list_candidates(session.id)
+
+            async def runner(current_session, control):
+                await application.run_session(current_session, candidates, control)
+
+            await application.sessions.start(session, runner)
+            managed = await application.sessions.active_for_group("g1")
+            await asyncio.wait_for(managed.task, timeout=2)
+
+            persisted = await store.get_session(session.id)
+            self.assertEqual(persisted.status, SessionStatus.PAUSED)
+            self.assertEqual(persisted.current_index, 4)
+            self.assertEqual(len(notified), 1)
+            self.assertIn("连续 2 张", notified[0][1])
+            self.assertEqual(notified[0][0], "umo")
+            await store.close()
+
+        notified = []
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory), notified))
+
+    def test_send_failure_counter_resets_after_success(self):
+        async def scenario(root, notified):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            for name in ("one.png", "two.png", "three.png"):
+                (project_root / name).write_bytes(b"x")
+            config = VoteConfig.from_mapping(
+                {
+                    "input_root": str(input_root),
+                    "output_root": str(root / "reports"),
+                    "send_failure_pause_threshold": 2,
+                }
+            )
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+
+            async def sender(session, candidate, image_path):
+                if candidate.display_index in {1, 3}:
+                    raise RuntimeError("send failed")
+
+            async def notifier(umo, text):
+                notified.append(text)
+
+            application = VoteApplication(
+                config,
+                ProjectService(input_root),
+                store,
+                SessionManager(),
+                VoteRouter(),
+                sender=sender,
+                notifier=notifier,
+            )
+            session = await application.prepare_session("g1", "umo", "demo")
+            session.interval_seconds = 0
+            session.final_grace_seconds = 0
+            candidates = await store.list_candidates(session.id)
+
+            async def runner(current_session, control):
+                await application.run_session(current_session, candidates, control)
+
+            await application.sessions.start(session, runner)
+            managed = await application.sessions.active_for_group("g1")
+            await asyncio.wait_for(managed.task, timeout=2)
+
+            persisted = await store.get_session(session.id)
+            self.assertEqual(persisted.status, SessionStatus.COMPLETED)
+            self.assertEqual(persisted.current_index, 3)
+            self.assertEqual(notified, [])
+            await store.close()
+
+        notified = []
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory), notified))

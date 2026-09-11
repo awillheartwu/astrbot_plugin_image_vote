@@ -35,6 +35,7 @@ DEFAULT_CONFIG = {
     "report_retention_days": 30,
     "max_send_retries": 3,
     "send_retry_base_seconds": 2,
+    "send_failure_pause_threshold": 3,
 }
 
 
@@ -81,6 +82,7 @@ class VoteConfig:
     report_retention_days: int = 30
     max_send_retries: int = 3
     send_retry_base_seconds: int = 2
+    send_failure_pause_threshold: int = 3
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "VoteConfig":
@@ -117,6 +119,8 @@ class VoteConfig:
             raise ValueError("single_html_max_mb must be positive")
         if self.ai_top_n < 0 or self.ai_bottom_n < 0:
             raise ValueError("ai_top_n/ai_bottom_n cannot be negative")
+        if self.send_failure_pause_threshold < 0:
+            raise ValueError("send_failure_pause_threshold cannot be negative")
 
     @property
     def effective_final_grace_seconds(self) -> int:

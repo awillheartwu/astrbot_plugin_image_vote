@@ -26,6 +26,20 @@ class AstrBotAdapter:
             raise RuntimeError("AstrBot could not resolve unified message origin")
         return None
 
+    async def send_text(self, umo: str, text: str) -> None:
+        """纯文本通知（自动暂停提示等），不附带图片。"""
+        try:
+            from astrbot.api.event import MessageChain
+
+            chain = MessageChain().message(text)
+        except (ImportError, AttributeError):
+            from astrbot.api.message_components import Plain
+
+            chain = [Plain(text)]
+        result = await self.context.send_message(umo, chain)
+        if result is False:
+            raise RuntimeError("AstrBot could not resolve unified message origin")
+
     def resolve_reply(self, event: Any) -> Optional[ReplyPayload]:
         message_obj = getattr(event, "message_obj", None)
         components = getattr(message_obj, "message", None) or []

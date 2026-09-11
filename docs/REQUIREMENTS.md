@@ -717,8 +717,8 @@ max(interval_seconds, 20)
 | 私聊发数字 | 忽略 | 只监听群消息 |
 | 机器人自己发出的数字 | 不计票 | 监听入口比对 `self_id` 后跳过 |
 | 发送失败的图片 | 不作为投票目标 | 窗口票落在最近一次成功发送的图片上（`active_candidate_id`） |
-| 连续多张发送失败 | 继续下一张 | 可选：连续失败 N 张后自动暂停并提示管理员 |
-| 短 ID 碰撞（4 位十六进制） | 概率极低但存在 | 可选：提高到 6-8 位或延长内部标记 |
+| 连续多张发送失败 | 达到阈值自动暂停并提示管理员 | 阈值由 `send_failure_pause_threshold` 配置，默认 3，0 表示关闭；`/vote resume` 可继续 |
+| 短 ID 碰撞 | 概率可忽略 | 短 ID 为 8 位十六进制（约 43 亿种）；4 位的历史会话仍能正常解析 |
 
 ---
 
@@ -1350,6 +1350,7 @@ report_retention_days: int = 30
 ```text
 max_send_retries: int = 3
 send_retry_base_seconds: int = 2
+send_failure_pause_threshold: int = 3
 ```
 
 ---

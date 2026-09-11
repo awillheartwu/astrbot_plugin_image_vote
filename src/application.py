@@ -43,6 +43,7 @@ class VoteApplication:
         report_generator: Optional[object] = None,
         image_processor: Optional[object] = None,
         ai_summary_service: Optional[AiSummaryService] = None,
+        notifier: Optional[Callable[[str, str], Awaitable[None]]] = None,
     ):
         self.config = config
         self.projects = projects
@@ -53,6 +54,7 @@ class VoteApplication:
         self.report_generator = report_generator
         self.image_processor = image_processor
         self.ai_summary_service = ai_summary_service
+        self.notifier = notifier
         self._range_warned: set = set()
 
     async def prepare_session(self, group_id: str, umo: str, project_name: str) -> Session:
@@ -70,7 +72,7 @@ class VoteApplication:
         session_id = uuid.uuid4().hex
         session = Session(
             id=session_id,
-            short_id=secrets.token_hex(2).upper(),
+            short_id=secrets.token_hex(4).upper(),
             group_id=group_id,
             umo=umo,
             project_name=snapshot.project_name,
@@ -144,6 +146,7 @@ class VoteApplication:
             session.interval_seconds,
         )
         try:
+            consecutive_failures = 0
             for index in range(session.current_index, len(candidates)):
                 await control.wait_if_paused()
                 if control.stop_requested:
@@ -161,6 +164,7 @@ class VoteApplication:
                     candidate.send_status = SendStatus.SENT
                     candidate.sent_at = utc_now()
                     session.active_candidate_id = candidate.id
+                    consecutive_failures = 0
                     logger.debug(
                         "session %s 已发送第 %d/%d 张：%s",
                         session.short_id,
@@ -171,15 +175,21 @@ class VoteApplication:
                 except Exception as exc:
                     candidate.send_status = SendStatus.SEND_FAILED
                     session.error_message = str(exc)
+                    consecutive_failures += 1
                     logger.warning(
-                        "session %s 第 %d 张发送失败，继续后续图片；窗口投票仍记在上一张成功发送的图片上：%s",
+                        "session %s 第 %d 张发送失败（连续第 %d 张），窗口投票仍记在上一张成功发送的图片上：%s",
                         session.short_id,
                         candidate.display_index,
+                        consecutive_failures,
                         exc,
                     )
                 session.current_index = index + 1
                 await self.store.save_candidates([candidate])
                 await self.store.save_session(session)
+                limit = self.config.send_failure_pause_threshold
+                if limit and consecutive_failures >= limit:
+                    await self._pause_after_send_failures(session, consecutive_failures)
+                    return
                 if control.stop_requested:
                     await self._cancel_session(session)
                     return
@@ -258,6 +268,22 @@ class VoteApplication:
             session.short_id,
             session.current_index,
         )
+
+    async def _pause_after_send_failures(self, session: Session, failures: int) -> None:
+        session.status = SessionStatus.PAUSED
+        session.error_message = "%d consecutive send failures" % failures
+        await self.store.save_session(session)
+        logger.error("session %s 连续 %d 张发送失败，已自动暂停", session.short_id, failures)
+        if self.notifier is None:
+            return
+        try:
+            await self.notifier(
+                session.umo,
+                "投票已自动暂停：连续 %d 张图片发送失败。请检查机器人状态，由管理员执行 /vote resume 继续。"
+                % failures,
+            )
+        except Exception as exc:
+            logger.warning("自动暂停通知发送失败：%s", exc)
 
     async def recover_incomplete_sessions(self) -> None:
         for session in await self.store.list_incomplete_sessions():

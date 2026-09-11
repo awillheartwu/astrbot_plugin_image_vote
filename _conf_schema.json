@@ -205,6 +205,12 @@
         "description": "重试基础间隔（秒）",
         "type": "int",
         "default": 2
+      },
+      "send_failure_pause_threshold": {
+        "description": "连续发送失败多少张后自动暂停",
+        "type": "int",
+        "default": 3,
+        "hint": "0 表示不自动暂停；命中阈值后会在群里提示管理员，可用 /vote resume 继续。"
       }
     }
   }

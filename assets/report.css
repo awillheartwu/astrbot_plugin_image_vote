@@ -1,0 +1,39 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --text: #19202a;
+  --muted: #687386;
+  --line: #e4e8ef;
+  --accent: #6d5dfc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #12151b; --surface: #1b2029; --text: #f2f4f8; --muted: #aab4c5; --line: #303846; }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, sans-serif; }
+.container { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
+.eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+h1 { margin: 4px 0; font-size: clamp(30px, 6vw, 58px); line-height: 1.05; }
+h2 { margin: 0; font-size: 19px; }
+.meta, .filename { color: var(--muted); }
+.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 28px 0; }
+.summary-grid div { padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+.summary-grid strong, .summary-grid span { display: block; }
+.summary-grid strong { font-size: 24px; }
+.summary-grid span { color: var(--muted); font-size: 13px; }
+.ai-summary { padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+.toolbar { display: flex; gap: 10px; margin: 24px 0; }
+input, button { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); padding: 10px 12px; font: inherit; }
+input { flex: 1; }
+button { cursor: pointer; }
+.candidate-grid { display: grid; gap: 14px; }
+.candidate-card { display: grid; grid-template-columns: 180px 1fr; gap: 18px; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.candidate-card img { width: 180px; height: 135px; object-fit: cover; border-radius: 10px; background: var(--bg); }
+.score { color: var(--accent); font-weight: 700; }
+.distribution { color: var(--muted); font-size: 14px; }
+.send-failed { color: #d9480f; font-weight: 700; font-size: 14px; }
+.hint { align-self: center; color: var(--muted); font-size: 13px; }
+@media (max-width: 640px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } .candidate-card { grid-template-columns: 1fr; } .candidate-card img { width: 100%; height: auto; max-height: 300px; } }

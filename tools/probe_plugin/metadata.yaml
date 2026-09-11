@@ -1,0 +1,5 @@
+name: astrbot_plugin_image_vote_probe
+display_name: 图片投票 API 探针
+desc: 临时探针插件：打印群消息组件结构、Reply 字段与配置对象类型，用于确认 AstrBot 版本兼容点。不回复任何群消息。
+version: 0.0.1
+author: AstrBot Image Vote

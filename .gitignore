@@ -1,0 +1,21 @@
+# 运行时数据（插件默认把项目/报告放在这里）
+/data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# SQLite 与本地探针产物
+*.db
+*.sqlite3
+/probe-output/
+/probe-report*.txt
+/dist/
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/

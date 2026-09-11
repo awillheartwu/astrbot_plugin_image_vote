@@ -1,0 +1,10 @@
+name: astrbot_plugin_image_vote
+display_name: AstrBot 图片轮播投票
+short_desc: 在 QQ 群里轮播项目图片并收集 1-4 分投票，自动生成带压缩图的 HTML 报告。
+desc: 在 QQ 群中轮播本地项目图片并收集 1-4 分投票，生成目录式 HTML 报告。
+version: 0.4.0
+author: AstrBot Image Vote
+astrbot_version: ">=4.27.0"
+support_platforms:
+  - aiocqhttp
+repo: https://github.com/awillheartwu/astrbot_plugin_image_vote

@@ -1,0 +1,209 @@
+{
+  "paths": {
+    "description": "路径设置",
+    "type": "object",
+    "hint": "两个路径都必须是 AstrBot 进程实际能访问的容器内路径。Docker 部署时先在 compose 里把宿主机目录映射进来，例如 /mnt/vote-projects/sample:/vote/projects/sample:ro。",
+    "items": {
+      "input_root": {
+        "description": "图片项目根目录",
+        "type": "string",
+        "default": "./data/projects",
+        "hint": "每个子文件夹是一个投票项目，项目名就是文件夹名。插件只读取这里，不会写入或删除。"
+      },
+      "output_root": {
+        "description": "报告输出根目录",
+        "type": "string",
+        "default": "./data/reports",
+        "hint": "报告按 项目名/session 短ID 分目录存放，清理命令只删除本插件写入并带 marker 的报告目录。"
+      },
+      "recursive_scan": {
+        "description": "递归扫描项目子目录",
+        "type": "bool",
+        "default": false,
+        "hint": "默认只扫描项目文件夹第一层。"
+      }
+    }
+  },
+  "voting": {
+    "description": "投票设置",
+    "type": "object",
+    "hint": "评分范围默认 1-4，普通群消息只有内容严格等于单个数字时才计票。",
+    "items": {
+      "default_interval_seconds": {
+        "description": "每张图发送间隔（秒）",
+        "type": "int",
+        "default": 20
+      },
+      "final_grace_seconds": {
+        "description": "最后一张图的额外等待（秒）",
+        "type": "int",
+        "default": 20,
+        "hint": "实际生效值不会小于发送间隔，也不会小于 20 秒。"
+      },
+      "score_min": {
+        "description": "最低分",
+        "type": "int",
+        "default": 1
+      },
+      "score_max": {
+        "description": "最高分",
+        "type": "int",
+        "default": 4
+      },
+      "same_user_vote_policy": {
+        "description": "同一用户重复投票策略",
+        "type": "string",
+        "options": ["last_wins"],
+        "default": "last_wins",
+        "hint": "当前版本只支持 last_wins：同一用户对同一张图重复投票时覆盖旧值。"
+      },
+      "allow_quoted_vote_after_window": {
+        "description": "允许引用旧图补票",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后可以引用之前由插件发送的投票图片，再补投或改分。"
+      },
+      "ack_vote": {
+        "description": "每票回复确认",
+        "type": "bool",
+        "default": false,
+        "hint": "默认关闭，避免在群里刷屏。"
+      }
+    }
+  },
+  "permissions": {
+    "description": "权限设置",
+    "type": "object",
+    "items": {
+      "admin_only_start": {
+        "description": "仅管理员可开始与停止投票",
+        "type": "bool",
+        "default": true
+      },
+      "allowed_group_ids": {
+        "description": "允许使用的群号白名单",
+        "type": "list",
+        "default": [],
+        "hint": "留空表示不限制；填写后只有列表内的群可以开始投票。",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "report": {
+    "description": "报告与图片压缩",
+    "type": "object",
+    "hint": "报告默认使用目录模式：原图不复制、不修改，只生成压缩后的 WebP 派生图和缩略图。",
+    "items": {
+      "report_mode": {
+        "description": "报告模式",
+        "type": "string",
+        "options": ["directory", "single_html"],
+        "default": "directory"
+      },
+      "report_image_format": {
+        "description": "派生图片格式",
+        "type": "string",
+        "options": ["webp", "jpeg", "png"],
+        "default": "webp"
+      },
+      "report_image_max_width": {
+        "description": "报告主图最大宽度",
+        "type": "int",
+        "default": 1920
+      },
+      "report_image_max_height": {
+        "description": "报告主图最大高度",
+        "type": "int",
+        "default": 1920
+      },
+      "report_image_quality": {
+        "description": "报告主图质量",
+        "type": "int",
+        "default": 82
+      },
+      "thumbnail_width": {
+        "description": "缩略图宽度",
+        "type": "int",
+        "default": 480
+      },
+      "thumbnail_quality": {
+        "description": "缩略图质量",
+        "type": "int",
+        "default": 72
+      },
+      "strip_metadata": {
+        "description": "移除派生图元数据",
+        "type": "bool",
+        "default": true
+      },
+      "single_html_max_mb": {
+        "description": "单文件报告体积上限（MB）",
+        "type": "int",
+        "default": 50,
+        "hint": "仅在 report_mode 为 single_html 时生效，超过上限自动回退目录模式。"
+      }
+    }
+  },
+  "ai": {
+    "description": "AI 总结",
+    "type": "object",
+    "hint": "AI 只接收结构化统计数据，不接收图片；调用失败时仍会正常生成统计报告。",
+    "items": {
+      "ai_summary_enabled": {
+        "description": "启用 AI 统计总结",
+        "type": "bool",
+        "default": true
+      },
+      "ai_provider_id": {
+        "description": "指定 AI Provider ID",
+        "type": "string",
+        "default": "",
+        "hint": "留空表示使用当前群会话默认的 Provider。"
+      },
+      "ai_top_n": {
+        "description": "总结中引用的高分项数量",
+        "type": "int",
+        "default": 5
+      },
+      "ai_bottom_n": {
+        "description": "总结中引用的低分项数量",
+        "type": "int",
+        "default": 3
+      }
+    }
+  },
+  "maintenance": {
+    "description": "恢复与清理",
+    "type": "object",
+    "items": {
+      "auto_resume_after_restart": {
+        "description": "重启后自动继续轮播",
+        "type": "bool",
+        "default": false,
+        "hint": "默认关闭：重启后未完成的投票会停在 PAUSED，需要管理员手动 /vote resume。"
+      },
+      "auto_cleanup_reports": {
+        "description": "自动清理过期报告",
+        "type": "bool",
+        "default": false
+      },
+      "report_retention_days": {
+        "description": "报告保留天数",
+        "type": "int",
+        "default": 30
+      },
+      "max_send_retries": {
+        "description": "单张图片最大发送重试次数",
+        "type": "int",
+        "default": 3
+      },
+      "send_retry_base_seconds": {
+        "description": "重试基础间隔（秒）",
+        "type": "int",
+        "default": 2
+      }
+    }
+  }
+}

@@ -1,5 +1,7 @@
 # 路线图与差距清单
 
+> 2026-09-13 更新：N1–N5 的报告与插件工作区已落地于 0.12.0；下方旧差距表保留为历史基线，当前实现和验收状态以 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 为准。
+
 更新时间：2026-09-11。基线：`docs/REQUIREMENTS.md`（1751 行）＋ 真机验收结果（AstrBot 4.27.5 / NapCat / 本地 Portainer stack）。
 
 ## 一、已真机验证

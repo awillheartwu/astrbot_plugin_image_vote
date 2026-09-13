@@ -106,5 +106,20 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v
 
 - 只在 AstrBot 4.27.5 加 NapCat 的组合上做过真机验收，其他版本与平台未验证。
 - 跨目录项目要先用 volume 把图库根目录映射进容器，再用 `/vote register` 或 `projects.json` 登记；容器看不到的路径无法使用。
-- 报告里目前只有投票人昵称，头像与按人视图在路线图里。
+- 报告可包含昵称、缓存头像和最终逐人评分；`report_include_participants=false` 生成不含这些明细与群号的汇总分享版。
 - `single_html` 模式可选，超过 `single_html_max_mb` 会自动回退目录模式。
+
+## 插件网页与新版报告（0.12.0）
+
+在 AstrBot 的本插件 Pages 中打开「image-vote」页面，使用当前 Dashboard 管理员账户操作。网页提供：
+
+- **运行**：从已连接的 OneBot 群选择目标，预检后启动；暂停、继续、提前结束或取消。
+- **项目**：登记容器内目录、编辑项目覆盖参数、预览图片；目录浏览限于输入根、登记目录及 `web_browse_roots`。取消登记不会删除原图。
+- **历史与报告**：查看场次与报告状态，预览、下载、重新生成和清理。目录报告下载完整 ZIP，单文件报告下载 HTML。
+- **设置**：分组与搜索，修改后明确保存；配置仍写入同一份 AstrBotConfig。发现其他页面修改会拒绝覆盖，保留当前草稿。
+
+新版报告有「概览 / 全部图片 / 按人查看」，支持图册与列表、分值分布、分歧排序、参与者最终评分、明暗主题。报告不需要后台或 CDN；目录版请保留整个目录，单文件版可以独立打开。缺少逐人数据的历史报告仍可重新导出补齐。
+
+`ai_prompt_template` 留空使用默认模板，支持 `{project_name}`、`{statistics}`、`{top_n}`、`{bottom_n}`、`{score_min}`、`{score_max}`。普通导出复用已有 AI 摘要，只有 `/vote export --ai` 或网页勾选重新生成时才再次调用模型。AI 只接收统计，不接收整批图片。
+
+本轮网页按 AstrBot **v4.27.5** 官方接口实现，并进行了本地隔离验收；不代表已部署到你的实际实例。复现命令、完整验证范围和限制见 [实现与验收记录](docs/IMPLEMENTATION_STATUS.md)。

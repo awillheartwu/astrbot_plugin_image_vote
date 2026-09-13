@@ -46,7 +46,9 @@ class PillowImageProcessor:
         main_path.parent.mkdir(parents=True, exist_ok=True)
         thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
         with Image.open(str(source_path)) as source:
-            image = ImageOps.exif_transpose(source).copy()
+            # exif_transpose already returns an independent image; a second full-size copy
+            # needlessly duplicates decoded pixels for large inputs.
+            image = ImageOps.exif_transpose(source)
         image.thumbnail((self.max_width, self.max_height), Image.Resampling.LANCZOS)
         self._save(image, main_path, self.quality)
         thumbnail = image.copy()

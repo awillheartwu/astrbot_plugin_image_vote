@@ -5,6 +5,10 @@ import base64
 import html
 import json
 import mimetypes
+import os
+import tempfile
+import uuid
+import weakref
 import re
 import shutil
 import time
@@ -13,13 +17,15 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Protocol
 
 from .logging_utils import get_logger
-from .models import Candidate, Session, SessionStatistics
+from .models import Candidate, Session, SessionStatistics, Vote
+from .report_data import enrich_report
 from .path_guard import PathGuard, UnsafePathError
 
 
 REPORT_MARKER = ".astrbot_image_vote_report"
 PLUGIN_NAME = "astrbot_plugin_image_vote"
 logger = get_logger()
+_report_locks = weakref.WeakValueDictionary()
 
 
 class ImageProcessor(Protocol):
@@ -32,11 +38,12 @@ class ReportGenerationError(RuntimeError):
 
 
 class DirectoryReportGenerator:
-    def __init__(self, asset_root: Optional[Path] = None, image_extension: str = "webp"):
+    def __init__(self, asset_root: Optional[Path] = None, image_extension: str = "webp", avatar_service=None):
         self.asset_root = asset_root or Path(__file__).resolve().parent.parent / "assets"
         self.image_extension = image_extension.lstrip(".").lower()
+        self.avatar_service = avatar_service
 
-    async def generate(
+    async def _generate_directory(
         self,
         session: Session,
         candidates: Iterable[Candidate],
@@ -45,6 +52,8 @@ class DirectoryReportGenerator:
         output_root: Path,
         image_processor: ImageProcessor,
         ai_summary: Optional[str] = None,
+        votes: Optional[Iterable[Vote]] = None,
+        include_participants: bool = True,
     ) -> Path:
         source_guard = PathGuard(source_root)
         output_guard = PathGuard(output_root)
@@ -58,6 +67,8 @@ class DirectoryReportGenerator:
         self._copy_assets(report_dir)
 
         candidate_list = list(candidates)
+        if votes is not None:
+            votes = tuple(votes)
         stats_by_id = {item.candidate_id: item for item in statistics.candidates}
         rows: List[Dict[str, object]] = []
         for candidate in candidate_list:
@@ -66,7 +77,13 @@ class DirectoryReportGenerator:
             main_path = images_dir / (stem + "." + self.image_extension)
             thumb_path = images_dir / (stem + "_thumb." + self.image_extension)
             try:
-                await asyncio.to_thread(image_processor.process, source_path, main_path, thumb_path)
+                # A cancelled task must wait for its worker before removing staging files.
+                worker = asyncio.create_task(asyncio.to_thread(image_processor.process, source_path, main_path, thumb_path))
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    await worker
+                    raise
             except Exception as exc:
                 raise ReportGenerationError("failed to process %s: %s" % (candidate.source_filename, exc)) from exc
             item = stats_by_id[candidate.id]
@@ -122,6 +139,22 @@ class DirectoryReportGenerator:
         }
         rows.sort(key=lambda row: (row["rank"] is None, row["rank"] or 0, row["display_index"]))
         payload["candidates"] = rows
+        enrich_report(payload, votes, include_participants)
+        if include_participants and self.avatar_service is not None and votes is not None:
+            candidate_ids = {c.id for c in candidate_list}
+            voter_ids = sorted({v.voter_id for v in votes if v.session_id == session.id
+                                and v.candidate_id in candidate_ids and session.score_min <= v.score <= session.score_max})
+            async def attach(index, voter_id):
+                content = await self.avatar_service.get(voter_id)
+                if content:
+                    relative = 'images/avatars/p%d.webp' % (index + 1)
+                    path = report_dir / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(content)
+                    payload['participants'][index]['avatar'] = relative
+            # Process a bounded batch instead of creating a task for every voter at once.
+            for offset in range(0, len(voter_ids), 4):
+                await asyncio.gather(*(attach(i, voter_ids[i]) for i in range(offset, min(offset + 4, len(voter_ids)))))
         (report_dir / "data.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         (report_dir / "index.html").write_text(self._render_html(payload), encoding="utf-8")
         PathGuard.write_report_marker(
@@ -137,44 +170,81 @@ class DirectoryReportGenerator:
         )
         return report_dir
 
-    async def generate_single_html(
-        self,
-        session: Session,
-        candidates: Iterable[Candidate],
-        statistics: SessionStatistics,
-        source_root: Path,
-        output_root: Path,
-        image_processor: ImageProcessor,
-        max_mb: int,
-        ai_summary: Optional[str] = None,
-    ) -> Path:
-        report_dir = await self.generate(
-            session,
-            candidates,
-            statistics,
-            source_root,
-            output_root,
-            image_processor,
-            ai_summary=ai_summary,
-        )
-        data_path = report_dir / "data.json"
-        payload = json.loads(data_path.read_text(encoding="utf-8"))
-        inline_payload = json.loads(json.dumps(payload, ensure_ascii=False))
-        for row in inline_payload["candidates"]:
-            row["main_image"] = self._data_uri(report_dir / row["main_image"])
-            row["thumbnail"] = self._data_uri(report_dir / row["thumbnail"])
-        standalone_html = self._render_inline_html(inline_payload)
-        if len(standalone_html.encode("utf-8")) > max_mb * 1024 * 1024:
-            payload["report_mode"] = "directory"
-            payload["fallback_reason"] = "single_html_max_mb exceeded"
-            data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.warning("单文件报告超过 %d MB 限制，已自动回退目录模式：%s", max_mb, report_dir)
-            return report_dir
-        payload["report_mode"] = "single_html"
-        data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        (report_dir / "index.html").write_text(standalone_html, encoding="utf-8")
-        self._remove_directory_only_assets(report_dir)
-        return report_dir
+    async def generate(self, session, candidates, statistics, source_root, output_root,
+                       image_processor, ai_summary=None, votes=None, include_participants=True):
+        return await self._publish(session, candidates, statistics, source_root, output_root,
+                                   image_processor, ai_summary, votes, include_participants, None)
+
+    async def generate_single_html(self, session, candidates, statistics, source_root, output_root,
+                                   image_processor, max_mb, ai_summary=None, votes=None,
+                                   include_participants=True):
+        return await self._publish(session, candidates, statistics, source_root, output_root,
+                                   image_processor, ai_summary, votes, include_participants, max_mb)
+
+    async def _publish(self, session, candidates, statistics, source_root, output_root,
+                       image_processor, ai_summary, votes, include_participants, max_mb):
+        key = str(Path(output_root).expanduser().resolve()) + ':' + session.id
+        lock = _report_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            return await self._publish_locked(session, candidates, statistics, source_root, output_root,
+                                             image_processor, ai_summary, votes, include_participants, max_mb)
+
+    async def _publish_locked(self, session, candidates, statistics, source_root, output_root,
+                             image_processor, ai_summary, votes, include_participants, max_mb):
+        # Complete in a staging directory. An unsuccessful re-export leaves the previous report intact.
+        output_root = Path(output_root).expanduser().resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='.image-vote-', dir=output_root) as temporary:
+            staged = await self._generate_directory(
+                session, candidates, statistics, source_root, Path(temporary), image_processor,
+                ai_summary=ai_summary, votes=votes, include_participants=include_participants)
+            data_path = staged / 'data.json'
+            payload = json.loads(data_path.read_text(encoding='utf-8'))
+            if max_mb is not None:
+                inline = json.loads(json.dumps(payload))
+                for row in inline['candidates']:
+                    row['main_image'] = self._data_uri(staged / row['main_image'])
+                    row['thumbnail'] = self._data_uri(staged / row['thumbnail'])
+                for person in inline['participants']:
+                    if person.get('avatar'):
+                        person['avatar'] = self._data_uri(staged / person['avatar'])
+                inline['report_mode'] = 'single_html'
+                page = self._render_inline_html(inline)
+                if len(page.encode('utf-8')) <= max_mb * 1024 * 1024:
+                    (staged / 'index.html').write_text(page, encoding='utf-8')
+                    payload['report_mode'] = 'single_html'
+                    # No dangling file references in the companion JSON after removing assets.
+                    for row in payload['candidates']:
+                        row['main_image'] = None
+                        row['thumbnail'] = None
+                    for person in payload['participants']:
+                        person['avatar'] = None
+                    self._remove_directory_only_assets(staged)
+                else:
+                    payload['fallback_reason'] = 'single_html_max_mb exceeded'
+                    (staged / 'index.html').write_text(self._render_html(payload), encoding='utf-8')
+                    logger.warning('单文件报告超过体积上限，已回退目录模式')
+                data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+            guard = PathGuard(output_root)
+            target = guard.ensure_within(output_root / self._slug(session.project_name) / staged.name, allow_root=False)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            backup = None
+            if target.exists():
+                guard.ensure_report_directory(target, REPORT_MARKER, PLUGIN_NAME)
+                marker = json.loads((target / REPORT_MARKER).read_text(encoding='utf-8'))
+                if marker.get('session_id') != session.id:
+                    raise ReportGenerationError('report directory belongs to another session')
+                backup = target.with_name('.backup-' + uuid.uuid4().hex)
+                os.replace(target, backup)
+            try:
+                os.replace(staged, target)
+            except BaseException:
+                if backup is not None:
+                    os.replace(backup, target)
+                raise
+            if backup is not None:
+                shutil.rmtree(backup)
+            return target
 
     @staticmethod
     def _remove_directory_only_assets(report_dir: Path) -> None:
@@ -218,7 +288,8 @@ class DirectoryReportGenerator:
 
     @staticmethod
     def _render_html(payload: Dict[str, object]) -> str:
-        session = payload["session"]
+        session = {"score_min": 1, "score_max": 4, **payload["session"]}
+        payload = {**payload, "session": session}
         statistics = payload["statistics"]
         rows = payload["candidates"]
         characters = payload.get("characters") or []
@@ -280,21 +351,22 @@ class DirectoryReportGenerator:
                 )
             )
         summary = payload.get("ai_summary") or "未启用 AI 总结，以上为纯统计结果。"
+        embedded = json.dumps(payload, ensure_ascii=False).replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
         return """<!doctype html>
 <html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <title>%s · 图片投票报告</title><link rel=\"stylesheet\" href=\"./report.css\"></head>
-<body><main class=\"container\"><header><div class=\"eyebrow\">ASTRBOT IMAGE VOTE</div><h1>%s</h1>
+<body><div id=\"report-app\"></div><main id=\"report-fallback\" class=\"container\"><header><div class=\"eyebrow\">ASTRBOT IMAGE VOTE</div><h1>%s</h1>
 <p class=\"meta\">Session %s · 群 %s · 状态 %s · 评分范围 %s-%s</p>
 <p class=\"meta\">开始 %s · 结束 %s</p><section class=\"summary-grid\">
 <div><strong>%s</strong><span>图片</span></div><div><strong>%s</strong><span>有效票</span></div><div><strong>%s</strong><span>参与人数</span></div><div><strong>%s</strong><span>总体平均分</span></div></section>
 <section class=\"ai-summary\"><h2>总结</h2><p>%s</p></section></header>
 %s
 <section class=\"toolbar\"><input id=\"search\" type=\"search\" placeholder=\"搜索图片名称\"><button id=\"sort\" type=\"button\">切换原始顺序</button><span class=\"hint\">默认按排名显示</span></section>
-<section id=\"candidates\" class=\"candidate-grid\">%s</section></main><script src=\"./report.js\"></script></body></html>""" % (
+<section id=\"candidates\" class=\"candidate-grid\">%s</section></main><script id=\"report-data\" type=\"application/json\">%s</script><script src=\"./report.js\"></script></body></html>""" % (
             html.escape(str(session["project_name"])),
             html.escape(str(session["project_name"])),
             html.escape(str(session["short_id"])),
-            html.escape(str(session["group_id"])),
+            html.escape(str(session.get("group_id", "汇总分享版"))),
             html.escape(str(session["status"])),
             session["score_min"],
             session["score_max"],
@@ -307,6 +379,7 @@ class DirectoryReportGenerator:
             html.escape(str(summary)),
             character_section,
             "".join(cards),
+            embedded,
         )
 
 

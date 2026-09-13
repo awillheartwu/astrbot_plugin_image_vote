@@ -377,7 +377,7 @@ class ApplicationTest(unittest.TestCase):
                 self.finished_at = None
 
             async def generate(
-                self, session, candidates, statistics, source_root, output_root, image_processor, ai_summary=None
+                self, session, candidates, statistics, source_root, output_root, image_processor, ai_summary=None, votes=None, include_participants=True
             ):
                 self.status = session.status
                 self.finished_at = session.finished_at
@@ -530,7 +530,7 @@ class ApplicationTest(unittest.TestCase):
 
             async def generate_single_html(
                 self, session, candidates, statistics, source_root, output_root, image_processor, max_mb,
-                ai_summary=None,
+                ai_summary=None, votes=None, include_participants=True,
             ):
                 self.calls += 1
                 report = Path(output_root) / "single-report"
@@ -711,7 +711,7 @@ class ApplicationTest(unittest.TestCase):
                 self.calls = 0
 
             async def generate(
-                self, session, candidates, statistics, source_root, output_root, image_processor, ai_summary=None
+                self, session, candidates, statistics, source_root, output_root, image_processor, ai_summary=None, votes=None, include_participants=True
             ):
                 self.calls += 1
                 return Path(output_root) / "report"

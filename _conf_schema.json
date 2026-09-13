@@ -21,6 +21,15 @@
         "type": "bool",
         "default": false,
         "hint": "默认只扫描项目文件夹第一层。"
+      },
+      "web_browse_roots": {
+        "description": "网页目录浏览根目录",
+        "type": "list",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "hint": "容器内绝对路径。网页只在这些目录、输入根目录和已登记目录内浏览；不会提供文件删除。"
       }
     }
   },
@@ -62,7 +71,12 @@
       "same_user_vote_policy": {
         "description": "同一用户重复投票策略",
         "type": "string",
-        "options": ["last_wins", "first_wins", "max_score", "min_score"],
+        "options": [
+          "last_wins",
+          "first_wins",
+          "max_score",
+          "min_score"
+        ],
         "default": "last_wins",
         "hint": "last_wins 最后一次生效；first_wins 保留最早一次；max_score 取最高分；min_score 取最低分。"
       },
@@ -108,13 +122,20 @@
       "report_mode": {
         "description": "报告模式",
         "type": "string",
-        "options": ["directory", "single_html"],
+        "options": [
+          "directory",
+          "single_html"
+        ],
         "default": "directory"
       },
       "report_image_format": {
         "description": "派生图片格式",
         "type": "string",
-        "options": ["webp", "jpeg", "png"],
+        "options": [
+          "webp",
+          "jpeg",
+          "png"
+        ],
         "default": "webp"
       },
       "report_image_max_width": {
@@ -152,6 +173,18 @@
         "type": "int",
         "default": 50,
         "hint": "仅在 report_mode 为 single_html 时生效，超过上限自动回退目录模式。"
+      },
+      "report_include_participants": {
+        "description": "报告包含参与者评分明细",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后生成汇总分享版，不包含昵称、逐人评分与群号。"
+      },
+      "report_include_avatars": {
+        "description": "报告包含参与者头像",
+        "type": "bool",
+        "default": true,
+        "hint": "从 QQ 头像服务获取并缓存派生图，失败显示姓名首字。汇总分享版不获取头像。"
       }
     }
   },
@@ -169,7 +202,8 @@
         "description": "指定 AI Provider ID",
         "type": "string",
         "default": "",
-        "hint": "留空表示使用当前群会话默认的 Provider。"
+        "hint": "留空表示使用当前群会话默认的 Provider。",
+        "_special": "select_provider"
       },
       "ai_top_n": {
         "description": "总结中引用的高分项数量",
@@ -180,6 +214,12 @@
         "description": "总结中引用的低分项数量",
         "type": "int",
         "default": 3
+      },
+      "ai_prompt_template": {
+        "description": "AI 总结提示词模板",
+        "type": "text",
+        "default": "",
+        "hint": "留空使用默认提示词。支持 {project_name}、{statistics}、{top_n}、{bottom_n}、{score_min}、{score_max}。AI 始终只接收统计。"
       }
     }
   },

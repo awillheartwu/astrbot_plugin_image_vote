@@ -66,6 +66,25 @@ class AdminEvent(FakeEvent):
 
 
 class MainTest(unittest.TestCase):
+    def test_running_application_uses_new_report_settings_without_changing_session_scale(self):
+        from unittest.mock import AsyncMock
+        async def scenario(root):
+            plugin=ImageVotePlugin(TempContext(root))
+            await plugin.store.initialize()
+            export_from_running_application=plugin.application._generate_report
+            session=Session('snapshot','SNAP','g','umo','demo',str(root),score_max=4)
+            plugin._apply_config({'input_root':str(root/'projects'),'output_root':str(root/'reports'),
+                                  'score_max':10,'report_mode':'single_html','report_image_quality':60})
+            generator=SimpleNamespace(generate_single_html=AsyncMock(return_value=root/'report'))
+            plugin.application.report_generator=generator
+            await export_from_running_application(session,[],object())
+            generator.generate_single_html.assert_awaited_once()
+            self.assertEqual(generator.generate_single_html.call_args.args[0].score_max,4)
+            self.assertEqual(plugin.application.image_processor.quality,60)
+            await plugin.terminate()
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
     def test_command_parser_preserves_project_name_spaces(self):
         self.assertEqual(ImageVotePlugin._parse_command("/vote check My Project"), ("check", "My Project"))
         self.assertEqual(ImageVotePlugin._parse_command("My Project"), ("start", "My Project"))

@@ -27,6 +27,8 @@ _message_sender_module = _internal("src.message_sender")
 _report_generator_module = _internal("src.report_generator")
 _image_processor_module = _internal("src.image_processor")
 _ai_module = _internal("src.ai_summary_service")
+_avatar_module = _internal("src.avatar_service")
+_workspace_module = _internal("src.workspace_api")
 _models_module = _internal("src.models")
 
 register = _compat.register
@@ -66,7 +68,7 @@ get_logger = _logging.get_logger
 
 logger = get_logger()
 
-BUILD = "2026-09-13.3"
+BUILD = "2026-09-13.4"
 CONFIG_KEYS = frozenset(VoteConfig.__dataclass_fields__)
 
 
@@ -81,7 +83,7 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
     PLUGIN_NAME,
     "AstrBot Image Vote",
     "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.11.0",
+    "0.12.0",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -93,6 +95,8 @@ class ImageVotePlugin(Star):
                 "找不到 AstrBot 的 EventMessageType，无法注册群消息监听；兼容信息：%s" % compat_report()
             )
         self.context = context
+        self._page_config_object = config if callable(getattr(config, 'save_config', None)) else None
+        self.workspace_api = None
         self.store = None
         self.session_manager = None
         self.adapter = None
@@ -131,14 +135,18 @@ class ImageVotePlugin(Star):
             VoteParser(self.settings.score_min, self.settings.score_max),
             allow_quoted_vote_after_window=self.settings.allow_quoted_vote_after_window,
         )
-        self.application = VoteApplication(
+        configured_application = VoteApplication(
             self.settings,
             self.project_service,
             self.store,
             self.session_manager,
             self.vote_router,
             sender=self._send_candidate,
-            report_generator=DirectoryReportGenerator(image_extension=self.settings.report_image_format),
+            report_generator=DirectoryReportGenerator(
+                image_extension=self.settings.report_image_format,
+                avatar_service=_avatar_module.AvatarService(data_dir / 'avatar_cache')
+                if self.settings.report_include_avatars and self.settings.report_include_participants else None,
+            ),
             image_processor=PillowImageProcessor(
                 image_format=self.settings.report_image_format,
                 max_width=self.settings.report_image_max_width,
@@ -152,12 +160,21 @@ class ImageVotePlugin(Star):
             notifier=self.adapter.send_text,
             file_sender=self.adapter.send_file,
         )
+        existing = getattr(self, 'application', None)
+        if existing is None:
+            self.application = configured_application
+        else:
+            # Running session closures retain this application instance. Refresh operation-time
+            # services in place; score/interval snapshots remain on the persisted Session.
+            for name in ('config', 'projects', 'router', 'sender', 'report_generator',
+                         'image_processor', 'ai_summary_service', 'notifier', 'file_sender'):
+                setattr(existing, name, getattr(configured_application, name))
 
     def _build_ai_summary_service(self):
         if not self.settings.ai_summary_enabled:
             logger.info("AI 总结已按配置关闭")
             return None
-        return AiSummaryService(self._generate_ai_summary)
+        return AiSummaryService(self._generate_ai_summary, prompt_template=self.settings.ai_prompt_template)
 
     async def _generate_ai_summary(self, prompt: str, umo: Optional[str] = None) -> str:
         provider_id = self.settings.ai_provider_id
@@ -238,6 +255,9 @@ class ImageVotePlugin(Star):
             return []
         config_dir = Path(self.store.database_path).parent.parent / "config"
         found = []
+        actual_path = getattr(self._page_config_object, 'config_path', None)
+        if actual_path and Path(actual_path).is_file():
+            found.append(Path(actual_path))
         expected = config_dir / ("%s_config.json" % PLUGIN_NAME)
         if expected.is_file():
             found.append(expected)
@@ -278,6 +298,9 @@ class ImageVotePlugin(Star):
         await self.store.initialize()
         await self.application.recover_incomplete_sessions()
         self.application.cleanup_expired_reports()
+        self.workspace_api = _workspace_module.WorkspaceAPI(self)
+        if self.workspace_api.register():
+            self.workspace_api.ready = True
 
     @filter.command("vote")
     async def vote_command(self, event: Any):
@@ -356,7 +379,9 @@ class ImageVotePlugin(Star):
                 return
             if command == "export":
                 try:
-                    report_path = await self.application.export_latest(group_id)
+                    if argument_text.strip() not in {"", "--ai"}:
+                        raise ValueError("用法：/vote export [--ai]")
+                    report_path = await self.application.export_latest(group_id, regenerate_ai=argument_text.strip() == "--ai")
                     yield self._plain_result(event, "报告已生成：%s" % self._relative_output_path(report_path))
                 except Exception as exc:
                     yield self._plain_result(event, "导出失败：%s" % exc)
@@ -442,6 +467,8 @@ class ImageVotePlugin(Star):
         return None
 
     async def terminate(self):
+        if self.workspace_api is not None:
+            await self.workspace_api.close()
         await self.session_manager.shutdown()
         await self.store.close()
 

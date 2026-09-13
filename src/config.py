@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from typing import Any, Dict, Mapping, Tuple
+from .ai_summary_service import validate_prompt_template
 
 
 DEFAULT_CONFIG = {
     "input_root": "./data/projects",
     "output_root": "./data/reports",
     "recursive_scan": False,
+    "web_browse_roots": [],
     "default_interval_seconds": 20,
     "final_grace_seconds": 20,
     "score_min": 1,
@@ -18,6 +20,8 @@ DEFAULT_CONFIG = {
     "admin_only_start": True,
     "allowed_group_ids": [],
     "report_mode": "directory",
+    "report_include_participants": True,
+    "report_include_avatars": True,
     "report_image_format": "webp",
     "report_image_max_width": 1920,
     "report_image_max_height": 1920,
@@ -28,6 +32,7 @@ DEFAULT_CONFIG = {
     "single_html_max_mb": 50,
     "ai_summary_enabled": True,
     "ai_provider_id": "",
+    "ai_prompt_template": "",
     "ai_top_n": 5,
     "ai_bottom_n": 3,
     "auto_resume_after_restart": False,
@@ -59,6 +64,7 @@ class VoteConfig:
     input_root: str
     output_root: str
     recursive_scan: bool = False
+    web_browse_roots: Tuple[str, ...] = ()
     default_interval_seconds: int = 20
     final_grace_seconds: int = 20
     score_min: int = 1
@@ -69,6 +75,8 @@ class VoteConfig:
     admin_only_start: bool = True
     allowed_group_ids: Tuple[str, ...] = ()
     report_mode: str = "directory"
+    report_include_participants: bool = True
+    report_include_avatars: bool = True
     report_image_format: str = "webp"
     report_image_max_width: int = 1920
     report_image_max_height: int = 1920
@@ -79,6 +87,7 @@ class VoteConfig:
     single_html_max_mb: int = 50
     ai_summary_enabled: bool = True
     ai_provider_id: str = ""
+    ai_prompt_template: str = ""
     ai_top_n: int = 5
     ai_bottom_n: int = 3
     auto_resume_after_restart: bool = False
@@ -99,11 +108,13 @@ class VoteConfig:
         field_names = {item.name for item in fields(cls)}
         values = {key: value for key, value in values.items() if key in field_names}
         values["allowed_group_ids"] = tuple(str(item) for item in values.get("allowed_group_ids", []))
+        values["web_browse_roots"] = tuple(str(item) for item in values.get("web_browse_roots", []))
         config = cls(**values)
         config.validate()
         return config
 
     def validate(self) -> None:
+        validate_prompt_template(self.ai_prompt_template)
         if self.score_min < 0 or self.score_max > 100 or self.score_min > self.score_max:
             raise ValueError("score_min/score_max must satisfy 0 <= min <= max <= 100")
         if self.default_interval_seconds <= 0:

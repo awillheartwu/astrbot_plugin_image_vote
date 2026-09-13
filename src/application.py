@@ -16,7 +16,7 @@ from .path_guard import PathGuard
 from .persistence import SQLiteStore
 from .project_service import ProjectService
 from .reply_resolver import ReplyPayload
-from .session_manager import SessionAlreadyActiveError, SessionManager
+from .session_manager import SessionAlreadyActiveError, SessionManager, SessionNotFoundError
 from .report_generator import ReportCleanupService
 from .statistics_service import calculate_statistics
 from .vote_collector import VoteRouter
@@ -130,10 +130,12 @@ class VoteApplication:
             raise
         return session
 
-    async def _start_existing_session(self, session: Session) -> None:
+    async def _start_existing_session(self, session: Session, finish_immediately: bool = False) -> None:
         candidates = await self.store.list_candidates(session.id)
 
         async def runner(current_session: Session, control) -> None:
+            if finish_immediately:
+                control.request_finish()
             await self.run_session(current_session, candidates, control)
 
         await self.sessions.start(session, runner)
@@ -259,6 +261,8 @@ class VoteApplication:
                 try:
                     report_path = await self._generate_report(session, candidates, statistics)
                     session.output_path = str(report_path)
+                    if session.error_message and session.error_message.startswith('report generation failed:'):
+                        session.error_message = None
                     await self.store.save_session(session)
                     logger.info("session %s 报告已生成：%s", session.short_id, report_path)
                     if self.config.send_report_html and self.config.report_mode == "single_html":
@@ -396,6 +400,13 @@ class VoteApplication:
         return managed.session
 
     async def finish(self, group_id: str) -> Session:
+        managed = await self.sessions.active_for_group(group_id)
+        if managed is None:
+            session = await self.store.latest_session_for_group(group_id)
+            if session is None or session.status != SessionStatus.PAUSED:
+                raise SessionNotFoundError(group_id)
+            await self._start_existing_session(session, finish_immediately=True)
+            return session
         await self.sessions.finish(group_id)
         managed = await self.sessions.active_for_group(group_id)
         await self.store.save_session(managed.session)
@@ -403,17 +414,32 @@ class VoteApplication:
         return managed.session
 
     async def stop(self, group_id: str) -> Session:
+        managed = await self.sessions.active_for_group(group_id)
+        if managed is None:
+            session = await self.store.latest_session_for_group(group_id)
+            if session is None or session.status != SessionStatus.PAUSED:
+                raise SessionNotFoundError(group_id)
+            await self._cancel_session(session)
+            return session
         session = await self.sessions.stop(group_id)
         await self._cancel_session(session)
         logger.info("session %s 已停止并保留已收投票（进度 %d/%d）", session.short_id, session.current_index, session.candidate_count)
         return session
 
-    async def export_latest(self, group_id: str) -> Path:
+    async def export_latest(self, group_id: str, regenerate_ai: bool = False) -> Path:
         if self.report_generator is None or self.image_processor is None:
             raise RuntimeError("report generation is not configured")
         session = await self.store.latest_session_for_group(group_id)
         if session is None or session.status not in {SessionStatus.COMPLETED, SessionStatus.CANCELLED}:
             raise RuntimeError("no completed or cancelled session can be exported")
+        return await self.export_session(session.id, regenerate_ai=regenerate_ai)
+
+    async def export_session(self, session_id: str, regenerate_ai: bool = False) -> Path:
+        if self.report_generator is None or self.image_processor is None:
+            raise RuntimeError('report generation is not configured')
+        session = await self.store.get_session(session_id)
+        if session is None or session.status not in {SessionStatus.COMPLETED, SessionStatus.CANCELLED}:
+            raise RuntimeError('only completed or cancelled sessions can be exported')
         await self._heal_project_name(session)
         candidates = await self.store.list_candidates(session.id)
         votes = await self.store.list_votes(session.id)
@@ -423,8 +449,19 @@ class VoteApplication:
             score_min=session.score_min,
             score_max=session.score_max,
         )
+        if regenerate_ai:
+            if self.ai_summary_service is None:
+                raise RuntimeError('AI summary is disabled or unavailable')
+            summary = await self.ai_summary_service.summarize(build_summary_statistics(
+                session.project_name, statistics, top_n=self.config.ai_top_n,
+                bottom_n=self.config.ai_bottom_n, score_min=session.score_min,
+                score_max=session.score_max), umo=session.umo)
+            if summary:
+                session.ai_summary = summary
         report_path = await self._generate_report(session, candidates, statistics)
         session.output_path = str(report_path)
+        if session.error_message and session.error_message.startswith('report generation failed:'):
+            session.error_message = None
         await self.store.save_session(session)
         logger.info("session %s 重新导出报告：%s", session.short_id, report_path)
         return report_path
@@ -487,6 +524,7 @@ class VoteApplication:
         await self.store.save_session(session)
 
     async def _generate_report(self, session: Session, candidates: Sequence[Candidate], statistics) -> Path:
+        votes = await self.store.list_votes(session.id)
         if self.config.report_mode == "single_html" and hasattr(self.report_generator, "generate_single_html"):
             return await self.report_generator.generate_single_html(
                 session,
@@ -497,6 +535,8 @@ class VoteApplication:
                 self.image_processor,
                 self.config.single_html_max_mb,
                 ai_summary=session.ai_summary,
+                votes=votes,
+                include_participants=self.config.report_include_participants,
             )
         return await self.report_generator.generate(
             session,
@@ -506,6 +546,8 @@ class VoteApplication:
             Path(self.config.output_root),
             self.image_processor,
             ai_summary=session.ai_summary,
+            votes=votes,
+            include_participants=self.config.report_include_participants,
         )
 
     async def record_vote(

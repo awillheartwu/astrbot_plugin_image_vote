@@ -26,11 +26,19 @@ class SessionControl:
         self._finish_event = asyncio.Event()
         self._wake_event = asyncio.Event()
         self.seconds_until_next: Optional[float] = None
+        self._interval_deadline: Optional[float] = None
+
+    def remaining_seconds(self) -> Optional[float]:
+        if self._interval_deadline is not None and self._resume_event.is_set():
+            return max(0.0, self._interval_deadline - asyncio.get_running_loop().time())
+        return self.seconds_until_next
 
     async def wait_if_paused(self) -> None:
         await self._resume_event.wait()
 
     def pause(self) -> None:
+        self.seconds_until_next = self.remaining_seconds()
+        self._interval_deadline = None
         self._resume_event.clear()
         self._wake_event.set()
 
@@ -61,14 +69,17 @@ class SessionControl:
                 if self.stop_requested or self.finish_requested:
                     return
                 started_at = loop.time()
+                self._interval_deadline = started_at + remaining
                 try:
                     await asyncio.wait_for(self._wake_event.wait(), timeout=remaining)
                 except asyncio.TimeoutError:
                     return
                 remaining -= max(0.0, loop.time() - started_at)
+                self._interval_deadline = None
                 self.seconds_until_next = max(0.0, remaining)
         finally:
             self.seconds_until_next = None
+            self._interval_deadline = None
 
     @property
     def stop_requested(self) -> bool:

@@ -304,6 +304,20 @@ class SQLiteStore:
         async with self._lock:
             return await asyncio.to_thread(self._latest_session_for_group_sync, group_id)
 
+    async def list_sessions(self, limit: int = 50, offset: int = 0, group_id: Optional[str] = None):
+        if not 1 <= limit <= 200 or offset < 0:
+            raise ValueError('invalid session pagination')
+        async with self._lock:
+            return await asyncio.to_thread(self._list_sessions_sync, limit, offset, group_id)
+
+    def _list_sessions_sync(self, limit, offset, group_id):
+        connection = self._require_connection()
+        where, values = (' WHERE group_id = ?', [group_id]) if group_id else ('', [])
+        total = connection.execute('SELECT COUNT(*) FROM sessions' + where, values).fetchone()[0]
+        rows = connection.execute('SELECT * FROM sessions' + where + ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?',
+                                  values + [limit, offset]).fetchall()
+        return {'total': total, 'sessions': [self._session_from_row(row) for row in rows]}
+
     def _latest_session_for_group_sync(self, group_id: str) -> Optional[Session]:
         connection = self._require_connection()
         row = connection.execute(

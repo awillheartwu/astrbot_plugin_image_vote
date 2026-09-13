@@ -110,8 +110,11 @@ class ProjectRegistry:
         return settings
 
     def register(self, project_name: str, path: Path, interval_seconds: Optional[int] = None,
-                 recursive: Optional[bool] = None, description: Optional[str] = None) -> None:
+                 recursive: Optional[bool] = None, description: Optional[str] = None,
+                 drop_name: Optional[str] = None) -> None:
+        """登记项目；drop_name 给定时同一次写入里移除旧名，改名不会只生效一半。"""
         name = _validate_name(project_name)
+        dropped = _validate_name(drop_name) if drop_name and drop_name != name else None
         candidate = Path(path).expanduser()
         if not candidate.is_absolute():
             raise ProjectRegistryError("path 必须是容器内绝对路径：%s" % path)
@@ -126,9 +129,11 @@ class ProjectRegistry:
         if description:
             entry["description"] = str(description)
         projects = self.entries()
+        if dropped:
+            projects.pop(dropped, None)
         projects[name] = entry
         self._write(projects)
-        logger.info("登记项目 %s → %s", name, candidate)
+        logger.info("登记项目 %s → %s%s", name, candidate, ("（移除旧名 %s）" % dropped) if dropped else "")
 
     def unregister(self, project_name: str) -> bool:
         name = _validate_name(project_name)
@@ -148,4 +153,3 @@ class ProjectRegistry:
         os.replace(str(temp), str(self.path))
         self._stamp = None
         self.reload(force=True)
-

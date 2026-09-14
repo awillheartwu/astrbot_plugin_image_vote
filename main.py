@@ -496,9 +496,12 @@ class ImageVotePlugin(Star):
 
         既没有场次、又不在白名单里的群直接退出，避免每条群消息都做一次 SQLite 查询。
         只缓存「没有场次」这个结论：场次一开始就会出现在内存里的活跃表，不受缓存影响。
+        结算中（FINALIZING）与准备中（PREPARING）同样不处理：截止符号已经发出，
+        此后的数字与引用票一律不计，也就不必记录。
         """
-        if await self.session_manager.active_for_group(group_id) is not None:
-            return True
+        managed = await self.session_manager.active_for_group(group_id)
+        if managed is not None:
+            return managed.session.status in {SessionStatus.RUNNING, SessionStatus.PAUSED}
         if self.settings.allowed_group_ids and group_id not in self.settings.allowed_group_ids:
             return False
         now = time.monotonic()

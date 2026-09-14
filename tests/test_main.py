@@ -201,6 +201,44 @@ class MainTest(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_finalizing_sessions_stop_processing_group_messages(self):
+        class ChatEvent:
+            message_str = "10"
+
+            def get_group_id(self):
+                return "g1"
+
+            def get_sender_id(self):
+                return "u1"
+
+        async def scenario(root):
+            plugin = ImageVotePlugin(TempContext(root))
+            await plugin.store.initialize()
+            session = Session(
+                "s1", "A7F3", "g1", "umo", "demo", "/tmp/demo", SessionStatus.FINALIZING, candidate_count=1,
+            )
+            await plugin.store.save_session(session)
+            calls = []
+            original = plugin.store.list_candidates
+
+            async def counting(session_id):
+                calls.append(session_id)
+                return await original(session_id)
+
+            plugin.store.list_candidates = counting
+            self.assertIsNone(await plugin.on_group_message(ChatEvent()))
+            self.assertEqual(calls, [], "结算中的场次不应再读候选、记票")
+
+            session.status = SessionStatus.PAUSED
+            await plugin.store.save_session(session)
+            plugin._session_probe_cache.clear()
+            await plugin.on_group_message(ChatEvent())
+            self.assertEqual(calls, ["s1"], "暂停场次仍要收票")
+            await plugin.store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
     def test_idle_group_messages_skip_repeated_store_queries(self):
         class ChatEvent:
             message_str = "随便聊聊"

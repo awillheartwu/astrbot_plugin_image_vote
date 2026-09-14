@@ -762,17 +762,19 @@ class ApplicationTest(unittest.TestCase):
         generator = RecordingGenerator()
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory), notified, generator, {}))
-        self.assertEqual(len(notified), 2)
-        self.assertIn("投票结束", notified[0])
-        self.assertIn("报告已生成", notified[1])
+        self.assertEqual(len(notified), 3)
+        self.assertIn("投票截止", notified[0])
+        self.assertIn("结算完成", notified[1])
+        self.assertIn("报告已生成", notified[2])
         self.assertEqual(generator.calls, 1)
 
         notified = []
         generator = RecordingGenerator()
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory), notified, generator, {"auto_report_on_finish": False}))
-        self.assertEqual(len(notified), 1)
-        self.assertIn("报告未生成", notified[0])
+        self.assertEqual(len(notified), 2)
+        self.assertIn("投票截止", notified[0])
+        self.assertIn("报告未生成", notified[1])
         self.assertEqual(generator.calls, 0)
 
         notified = []

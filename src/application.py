@@ -228,6 +228,8 @@ class VoteApplication:
             session.finished_at = utc_now()
             await self.store.save_session(session)
             logger.info("session %s 进入 FINALIZING，已发送 %d 张", session.short_id, session.current_index)
+            if self.config.notify_on_finish:
+                await self._notify_cutoff(session)
             votes = await self.store.list_votes(session.id)
             statistics = calculate_statistics(
                 candidates,
@@ -332,15 +334,21 @@ class VoteApplication:
         except Exception as exc:
             logger.warning("通知发送失败：%s", exc)
 
+    async def _notify_cutoff(self, session: Session) -> None:
+        """截止符号：这条消息之后发送的数字与引用票都不再计入。"""
+        await self._notify(
+            session.umo,
+            "⏹ 投票截止：%s\n已发送 %d/%d 张。此刻起发送的数字与引用票不再计入，正在结算…"
+            % (session.project_name, session.current_index, session.candidate_count),
+        )
+
     async def _notify_finish(self, session: Session, statistics, report_enabled: bool) -> None:
         hint = "报告生成中，完成后会再提示一次。" if report_enabled else "报告未生成，需要时执行 /vote export。"
         await self._notify(
             session.umo,
-            "投票结束：%s\n图片：%d 张（已发送 %d 张）\n有效票：%d，参与人数：%d\n%s"
+            "📊 结算完成：%s\n有效票：%d，参与人数：%d\n%s"
             % (
                 session.project_name,
-                session.candidate_count,
-                session.current_index,
                 statistics.total_valid_votes,
                 statistics.unique_voters,
                 hint,

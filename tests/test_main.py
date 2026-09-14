@@ -236,7 +236,7 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
-    def test_voter_name_prefers_group_card_over_nickname(self):
+    def test_voter_name_prefers_nickname_over_group_card(self):
         from src.astrbot_compat import get_sender_display_name
 
         def event(card, nickname, with_raw=True):
@@ -244,9 +244,11 @@ class MainTest(unittest.TestCase):
             message_obj = SimpleNamespace(sender=sender)
             if with_raw:
                 message_obj.raw_message = {"sender": {"user_id": "u1", "nickname": nickname, "card": card}}
-            return SimpleNamespace(message_obj=message_obj, get_sender_name=lambda: nickname)
+            # AstrBot 的 get_sender_name 是 card or nickname
+            return SimpleNamespace(message_obj=message_obj, get_sender_name=lambda: card or nickname)
 
-        self.assertEqual(get_sender_display_name(event("黑白星", "。")), "黑白星")
-        self.assertEqual(get_sender_display_name(event("", "。")), "。")
-        self.assertEqual(get_sender_display_name(event(None, "。")), "。")
-        self.assertEqual(get_sender_display_name(event("黑白星", "。", with_raw=False)), "。")
+        # 真实场景：昵称"黑白星"、群名片"。"，报告要显示昵称
+        self.assertEqual(get_sender_display_name(event("。", "黑白星")), "黑白星")
+        self.assertEqual(get_sender_display_name(event("无名片", "")), "无名片")
+        self.assertEqual(get_sender_display_name(event("无名片", None)), "无名片")
+        self.assertEqual(get_sender_display_name(event("。", "黑白星", with_raw=False)), "。")

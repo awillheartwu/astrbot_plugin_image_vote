@@ -8,7 +8,6 @@ import json
 import os
 import tempfile
 import zipfile
-from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 
@@ -23,10 +22,6 @@ from .statistics_service import calculate_statistics
 
 logger = get_logger()
 
-# 占位符：导出任务在完成参数校验前就占用 session_id，避免并发请求重复启动生成。
-_PENDING_EXPORT = object()
-
-
 class ConfigConflict(ValueError):
     pass
 
@@ -35,28 +30,13 @@ class WorkspaceService:
     def __init__(self, plugin):
         self.plugin = plugin
         self.lock = asyncio.Lock()
-        self.exports = {}
-        self.readers = {}
-        self.export_errors = {}
         self.group_cache = []
         self._groups_at = 0
         self.schema = json.loads((Path(__file__).resolve().parents[1] / '_conf_schema.json').read_text())
 
-    @asynccontextmanager
-    async def reading(self, session_id):
-        """标记有下载或预览正在读取该场次的报告，清理接口据此拒绝并发删除。"""
-        key = str(session_id)
-        async with self.lock:
-            self.readers[key] = self.readers.get(key, 0) + 1
-        try:
-            yield
-        finally:
-            async with self.lock:
-                remaining = self.readers.get(key, 1) - 1
-                if remaining > 0:
-                    self.readers[key] = remaining
-                else:
-                    self.readers.pop(key, None)
+    def reading(self, session_id):
+        """报告读取期间的互斥由应用层守卫持有：网页与群命令共用同一份状态。"""
+        return self.app.report_activity.reading(session_id)
 
     @property
     def app(self):
@@ -264,11 +244,12 @@ class WorkspaceService:
             managed = await self.plugin.session_manager.active_for_group(session.group_id)
             row['seconds_until_next'] = managed.control.remaining_seconds() if managed and managed.session.id == session.id else None
             available = bool(session.output_path and (Path(session.output_path)/'index.html').is_file())
-            error = self.export_errors.get(session.id)
-            if not error and session.error_message and session.error_message.startswith('report generation failed:'):
+            error = None
+            if session.error_message and session.error_message.startswith('report generation failed:'):
                 error = session.error_message
             row['report_available'] = available
-            row['report_state'] = ('generating' if session.id in self.exports or (managed and session.status == SessionStatus.COMPLETED)
+            row['report_state'] = ('generating' if self.app.report_activity.exporting(session.id)
+                                   or (managed and session.status == SessionStatus.COMPLETED)
                                    else 'failed' if error else 'ready' if available else 'missing')
             row['report_error'] = error
             row['active_candidate'] = next(({'id': c.id, 'name': c.display_title, 'index': c.display_index} for c in candidates if c.id == session.active_candidate_id), None)
@@ -308,36 +289,7 @@ class WorkspaceService:
             return {'session_id': session.id}
 
     async def export(self, session_id, regenerate_ai=False):
-        if session_id in self.exports:
-            raise ValueError('该报告正在生成')
-        # 先占位再校验：校验过程里有 await，占位放在检查之后会让并发请求都通过。
-        self.exports[session_id] = _PENDING_EXPORT
-        try:
-            session = await self.plugin.store.get_session(session_id)
-            if session is None or session.status not in {SessionStatus.COMPLETED, SessionStatus.CANCELLED}:
-                raise ValueError('只有已完成或已取消的场次可以导出')
-            managed = await self.plugin.session_manager.active_for_group(session.group_id)
-            if managed and managed.session.id == session_id:
-                raise ValueError('该场次尚在收尾，请稍后重试')
-            self.export_errors.pop(session_id, None)
-        except BaseException:
-            if self.exports.get(session_id) is _PENDING_EXPORT:
-                self.exports.pop(session_id, None)
-            raise
-        async def run():
-            try:
-                await self.app.export_session(session_id, regenerate_ai=regenerate_ai)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                self.export_errors[session_id] = str(exc)
-                current = await self.plugin.store.get_session(session_id)
-                if current is not None:
-                    current.error_message = 'report generation failed: ' + str(exc)
-                    await self.plugin.store.save_session(current)
-            finally:
-                self.exports.pop(session_id, None)
-        self.exports[session_id] = asyncio.create_task(run())
+        await self.app.start_report_export(session_id, regenerate_ai=regenerate_ai)
         return {'session_id': session_id, 'state': 'generating'}
 
     async def report_directory(self, session_id):
@@ -351,8 +303,4 @@ class WorkspaceService:
         return path
 
     async def shutdown(self):
-        tasks = [task for task in list(self.exports.values()) if isinstance(task, asyncio.Task)]
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        await self.app.report_activity.shutdown()

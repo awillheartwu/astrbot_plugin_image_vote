@@ -66,7 +66,7 @@ class ReportGeneratorTest(unittest.TestCase):
             foreign.mkdir(parents=True)
             (own / REPORT_MARKER).write_text('{"plugin":"%s","session_id":"s1"}' % PLUGIN_NAME, encoding="utf-8")
             (foreign / REPORT_MARKER).write_text('{"plugin":"other","session_id":"s2"}', encoding="utf-8")
-            self.assertEqual(ReportCleanupService(root).cleanup("s1"), 1)
+            self.assertEqual(ReportCleanupService(root).cleanup("s1").removed, 1)
             self.assertFalse(own.exists())
             self.assertTrue(foreign.exists())
             with self.assertRaises(PermissionError):
@@ -83,8 +83,8 @@ class ReportGeneratorTest(unittest.TestCase):
                     '{"plugin":"%s","session_id":"ff","short_id":"%s"}' % (PLUGIN_NAME, short_id),
                     encoding="utf-8",
                 )
-            self.assertEqual(ReportCleanupService(root).cleanup("a7f3"), 1)
-            self.assertEqual(ReportCleanupService(root).cleanup("B1C2-deadbeef"), 1)
+            self.assertEqual(ReportCleanupService(root).cleanup("a7f3").removed, 1)
+            self.assertEqual(ReportCleanupService(root).cleanup("B1C2-deadbeef").removed, 1)
             self.assertFalse(first.exists())
             self.assertFalse(second.exists())
 
@@ -103,7 +103,7 @@ class ReportGeneratorTest(unittest.TestCase):
             (fresh / REPORT_MARKER).write_text(
                 '{"plugin":"%s","session_id":"b","short_id":"NEW1"}' % PLUGIN_NAME, encoding="utf-8"
             )
-            self.assertEqual(ReportCleanupService(root).cleanup_expired(30), 1)
+            self.assertEqual(ReportCleanupService(root).cleanup_expired(30).removed, 1)
             self.assertFalse(old.exists())
             self.assertTrue(fresh.exists())
 

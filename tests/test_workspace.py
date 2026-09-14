@@ -81,6 +81,11 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
         await self.store.save_session(Session(session_id, session_id, 'g', 'umo', 'demo', '/unused',
                                              status=SessionStatus.COMPLETED, output_path=str(output)))
 
+    def configure_reporting(self):
+        # 这些用例只验证互斥，不真的生成报告：给应用层一个可用的报告服务占位。
+        self.plugin.application.report_generator = object()
+        self.plugin.application.image_processor = object()
+
     def api(self, query=None):
         request = SimpleNamespace(username='owner', query=query or {}, json=AsyncMock(return_value={}))
         web = SimpleNamespace(request=request, json_response=lambda d: d,
@@ -203,6 +208,7 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(control.remaining_seconds())
 
     async def test_concurrent_export_starts_only_one_generation(self):
+        self.configure_reporting()
         output = self.make_report('s1')
         await self.completed_session('s1', output)
         original = self.plugin.store.get_session
@@ -214,7 +220,7 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
         results = await asyncio.gather(self.service.export('s1'), self.service.export('s1'), return_exceptions=True)
         self.assertEqual(sum(isinstance(r, ValueError) for r in results), 1)
         self.assertEqual(sum(isinstance(r, dict) for r in results), 1)
-        for pending in list(self.service.exports.values()):
+        for pending in self.plugin.application.report_activity.pending():
             await pending
         self.plugin.application.export_session.assert_awaited_once()
 
@@ -233,10 +239,45 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
         output = self.make_report('s1')
         await self.completed_session('s1', output)
         api = self.api({'session_id': 's1'})
-        async with self.service.reading('s1'):
+        with self.service.reading('s1'):
             with self.assertRaises(ValueError):
                 await api.dispatch('reports/cleanup', 'POST', {'session_id': 's1', 'confirmed': True})
+            with self.assertRaises(ValueError):
+                self.plugin.application.cleanup_reports('s1')
         self.assertTrue(output.is_dir())
+
+    async def test_cleanup_refuses_while_report_is_generating(self):
+        self.configure_reporting()
+        output = self.make_report('s1')
+        await self.completed_session('s1', output)
+        started = asyncio.Event()
+        async def slow_export(session_id, regenerate_ai=False):
+            started.set()
+            await asyncio.sleep(.05)
+        self.plugin.application.export_session = slow_export
+        api = self.api({'session_id': 's1'})
+        await self.service.export('s1')
+        await started.wait()
+        with self.assertRaises(ValueError):
+            await api.dispatch('reports/cleanup', 'POST', {'session_id': 's1', 'confirmed': True})
+        with self.assertRaises(ValueError):
+            self.plugin.application.cleanup_reports('s1')
+        for pending in self.plugin.application.report_activity.pending():
+            await pending
+        self.assertTrue(output.is_dir())
+
+    async def test_export_refuses_while_report_is_being_cleaned(self):
+        self.configure_reporting()
+        output = self.make_report('s1')
+        await self.completed_session('s1', output)
+        # 清理占位期间（删除前后都不留空隙）不允许再启动生成。
+        with self.plugin.application.report_activity.cleaning('s1'):
+            with self.assertRaises(ValueError):
+                await self.service.export('s1')
+            with self.assertRaises(ValueError):
+                with self.service.reading('s1'):
+                    pass
+        self.assertEqual(self.plugin.application.report_activity.pending(), [])
 
     async def test_single_file_download_survives_report_cleanup(self):
         output = self.make_report('s1', body='<html>report body</html>')

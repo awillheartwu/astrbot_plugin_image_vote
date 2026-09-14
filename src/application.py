@@ -17,7 +17,8 @@ from .persistence import SQLiteStore
 from .project_service import ProjectService
 from .reply_resolver import ReplyPayload
 from .session_manager import SessionAlreadyActiveError, SessionManager, SessionNotFoundError
-from .report_generator import ReportCleanupService
+from .report_generator import CleanupResult, ReportCleanupService
+from .report_activity import ReportActivity
 from .statistics_service import calculate_statistics
 from .vote_collector import VoteRouter
 
@@ -45,6 +46,7 @@ class VoteApplication:
         ai_summary_service: Optional[AiSummaryService] = None,
         notifier: Optional[Callable[[str, str], Awaitable[None]]] = None,
         file_sender: Optional[Callable[[str, Path, str], Awaitable[None]]] = None,
+        report_activity: Optional[ReportActivity] = None,
     ):
         self.config = config
         self.projects = projects
@@ -57,6 +59,8 @@ class VoteApplication:
         self.ai_summary_service = ai_summary_service
         self.notifier = notifier
         self.file_sender = file_sender
+        # 报告读取、生成与清理的互斥由应用层持有，网页工作区与群命令共用同一份状态。
+        self.report_activity = report_activity or ReportActivity()
         self._range_warned: set = set()
 
     async def prepare_session(self, group_id: str, umo: str, project_name: str) -> Session:
@@ -432,9 +436,45 @@ class VoteApplication:
         session = await self.store.latest_session_for_group(group_id)
         if session is None or session.status not in {SessionStatus.COMPLETED, SessionStatus.CANCELLED}:
             raise RuntimeError("no completed or cancelled session can be exported")
-        return await self.export_session(session.id, regenerate_ai=regenerate_ai)
+        self.report_activity.reserve_export(session.id)
+        try:
+            return await self.export_session(session.id, regenerate_ai=regenerate_ai)
+        finally:
+            self.report_activity.release_export(session.id)
+
+    async def start_report_export(self, session_id: str, regenerate_ai: bool = False) -> None:
+        """占位后把报告生成放到后台任务；生成期间拒绝重复生成、读取与清理。"""
+        if self.report_generator is None or self.image_processor is None:
+            raise RuntimeError('report generation is not configured')
+        self.report_activity.reserve_export(session_id)
+        try:
+            session = await self.store.get_session(session_id)
+            if session is None or session.status not in {SessionStatus.COMPLETED, SessionStatus.CANCELLED}:
+                raise ValueError('只有已完成或已取消的场次可以导出')
+            managed = await self.sessions.active_for_group(session.group_id)
+            if managed and managed.session.id == session_id:
+                raise ValueError('该场次尚在收尾，请稍后重试')
+        except BaseException:
+            self.report_activity.release_export(session_id)
+            raise
+        task = asyncio.create_task(self._run_report_export(session_id, regenerate_ai))
+        self.report_activity.attach_task(session_id, task)
+
+    async def _run_report_export(self, session_id: str, regenerate_ai: bool) -> None:
+        try:
+            await self.export_session(session_id, regenerate_ai=regenerate_ai)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            current = await self.store.get_session(session_id)
+            if current is not None:
+                current.error_message = 'report generation failed: ' + str(exc)
+                await self.store.save_session(current)
+        finally:
+            self.report_activity.release_export(session_id)
 
     async def export_session(self, session_id: str, regenerate_ai: bool = False) -> Path:
+        """报告的生成实现；入口调用前必须先用 report_activity 占位（见 export_latest / start_report_export）。"""
         if self.report_generator is None or self.image_processor is None:
             raise RuntimeError('report generation is not configured')
         session = await self.store.get_session(session_id)
@@ -466,19 +506,23 @@ class VoteApplication:
         logger.info("session %s 重新导出报告：%s", session.short_id, report_path)
         return report_path
 
-    def cleanup_reports(self, selector: str, confirmed: bool = False) -> int:
-        removed = ReportCleanupService(Path(self.config.output_root)).cleanup(selector, confirmed=confirmed)
-        logger.info("清理报告：selector=%s，删除 %d 个目录", selector, removed)
-        return removed
-
-    def cleanup_expired_reports(self) -> int:
-        if not self.config.auto_cleanup_reports:
-            return 0
-        removed = ReportCleanupService(Path(self.config.output_root)).cleanup_expired(
-            self.config.report_retention_days
+    def cleanup_reports(self, selector: str, confirmed: bool = False) -> CleanupResult:
+        result = ReportCleanupService(Path(self.config.output_root)).cleanup(
+            selector, confirmed=confirmed, activity=self.report_activity
         )
-        logger.info("自动清理：删除 %d 个超过 %d 天的报告目录", removed, self.config.report_retention_days)
-        return removed
+        logger.info("清理报告：selector=%s，删除 %d 个目录，跳过 %d 个使用中的报告",
+                    selector, result.removed, result.skipped)
+        return result
+
+    def cleanup_expired_reports(self) -> CleanupResult:
+        if not self.config.auto_cleanup_reports:
+            return CleanupResult()
+        result = ReportCleanupService(Path(self.config.output_root)).cleanup_expired(
+            self.config.report_retention_days, activity=self.report_activity
+        )
+        logger.info("自动清理：删除 %d 个超过 %d 天的报告目录，跳过 %d 个使用中的报告",
+                    result.removed, self.config.report_retention_days, result.skipped)
+        return result
 
     def _warn_range_mismatch(self, session: Session) -> None:
         """运行中改了评分范围时提醒一次：计票以会话快照为准，新范围下个会话生效。"""

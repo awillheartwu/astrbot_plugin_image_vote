@@ -12,6 +12,7 @@ import weakref
 import re
 import shutil
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Protocol
@@ -20,6 +21,7 @@ from .logging_utils import get_logger
 from .models import Candidate, Session, SessionStatistics, Vote
 from .report_data import enrich_report
 from .path_guard import PathGuard, UnsafePathError
+from .report_activity import ReportBusyError
 
 
 REPORT_MARKER = ".astrbot_image_vote_report"
@@ -392,12 +394,21 @@ def _format_time(value: object) -> str:
         return value
 
 
+@dataclass
+class CleanupResult:
+    """清理结果：removed 为删除数，skipped 为因正在使用而跳过的数量。"""
+
+    removed: int = 0
+    skipped: int = 0
+
+
 class ReportCleanupService:
     def __init__(self, output_root: Path):
         self.output_root = output_root.expanduser()
         self.guard = PathGuard(self.output_root)
 
-    def cleanup(self, selector: str, confirmed: bool = False) -> int:
+    def cleanup(self, selector: str, confirmed: bool = False, activity=None) -> "CleanupResult":
+        """删除匹配的报告目录；activity 给定时跳过或拒绝正在生成、读取的报告。"""
         if selector == "all":
             if not confirmed:
                 raise PermissionError("cleaning all reports requires explicit confirmation")
@@ -407,8 +418,9 @@ class ReportCleanupService:
             target_project = DirectoryReportGenerator.project_slug(selector)
             target_session = selector
         if not self.output_root.is_dir():
-            return 0
+            return CleanupResult()
         removed = 0
+        skipped = 0
         for project_dir in self.output_root.iterdir():
             if not project_dir.is_dir() or project_dir.is_symlink():
                 continue
@@ -435,15 +447,29 @@ class ReportCleanupService:
                     or project_dir.name == target_project
                 )
                 if matches:
-                    self.guard.cleanup_report(report_dir, REPORT_MARKER, PLUGIN_NAME)
+                    if activity is None:
+                        self.guard.cleanup_report(report_dir, REPORT_MARKER, PLUGIN_NAME)
+                        removed += 1
+                        continue
+                    try:
+                        with activity.cleaning(session_id):
+                            self.guard.cleanup_report(report_dir, REPORT_MARKER, PLUGIN_NAME)
+                    except ReportBusyError:
+                        # 清理全部报告时跳过使用中的目录，定向清理则直接报错。
+                        if selector != "all":
+                            raise
+                        skipped += 1
+                        logger.warning("报告 %s 正在生成或读取，跳过清理", session_id or report_dir.name)
+                        continue
                     removed += 1
-        return removed
+        return CleanupResult(removed=removed, skipped=skipped)
 
-    def cleanup_expired(self, retention_days: int) -> int:
+    def cleanup_expired(self, retention_days: int, activity=None) -> CleanupResult:
         if retention_days <= 0 or not self.output_root.is_dir():
-            return 0
+            return CleanupResult()
         cutoff = time.time() - retention_days * 86400
         removed = 0
+        skipped = 0
         for project_dir in self.output_root.iterdir():
             if not project_dir.is_dir() or project_dir.is_symlink():
                 continue
@@ -461,12 +487,17 @@ class ReportCleanupService:
                     continue
                 if self._report_timestamp(payload, marker) >= cutoff:
                     continue
+                session_id = str(payload.get("session_id") or "")
+                if activity is not None and activity.busy(session_id):
+                    skipped += 1
+                    logger.warning("报告 %s 正在生成或读取，跳过自动清理", session_id or report_dir.name)
+                    continue
                 try:
                     self.guard.cleanup_report(report_dir, REPORT_MARKER, PLUGIN_NAME)
                     removed += 1
                 except UnsafePathError:
                     logger.error("自动清理跳过不安全的报告目录：%s", report_dir)
-        return removed
+        return CleanupResult(removed=removed, skipped=skipped)
 
     @staticmethod
     def _report_timestamp(payload: Dict[str, object], marker: Path) -> float:

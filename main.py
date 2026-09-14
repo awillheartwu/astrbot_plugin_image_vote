@@ -28,6 +28,7 @@ _report_generator_module = _internal("src.report_generator")
 _image_processor_module = _internal("src.image_processor")
 _ai_module = _internal("src.ai_summary_service")
 _avatar_module = _internal("src.avatar_service")
+_activity_module = _internal("src.report_activity")
 _workspace_module = _internal("src.workspace_api")
 _models_module = _internal("src.models")
 
@@ -96,6 +97,8 @@ class ImageVotePlugin(Star):
             )
         self.context = context
         self._page_config_object = config if callable(getattr(config, 'save_config', None)) else None
+        # 报告读取、生成与清理的守卫在插件生命周期内只建一次，配置热更新重建应用层时继续沿用。
+        self.report_activity = _activity_module.ReportActivity()
         self.workspace_api = None
         self.store = None
         self.session_manager = None
@@ -159,6 +162,7 @@ class ImageVotePlugin(Star):
             ai_summary_service=self._build_ai_summary_service(),
             notifier=self.adapter.send_text,
             file_sender=self.adapter.send_file,
+            report_activity=self.report_activity,
         )
         existing = getattr(self, 'application', None)
         if existing is None:
@@ -395,8 +399,11 @@ class ImageVotePlugin(Star):
                 return
             selector = cleanup_parts[0] if cleanup_parts[0] == "all" else argument_text.strip()
             try:
-                removed = self.application.cleanup_reports(selector, confirmed=cleanup_parts[0] == "all")
-                yield self._plain_result(event, "已清理 %d 个报告目录。" % removed)
+                result = self.application.cleanup_reports(selector, confirmed=cleanup_parts[0] == "all")
+                message = "已清理 %d 个报告目录。" % result.removed
+                if result.skipped:
+                    message += "\n跳过 %d 个正在生成或下载的报告。" % result.skipped
+                yield self._plain_result(event, message)
             except Exception as exc:
                 yield self._plain_result(event, "清理失败：%s" % exc)
             return

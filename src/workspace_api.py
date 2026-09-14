@@ -107,22 +107,19 @@ class WorkspaceAPI:
                 raise ValueError('清理报告需要确认')
             session_id = str(body.get('session_id',''))
             async with service.lock:
-                if session_id in service.exports:
-                    raise ValueError('报告正在生成，暂不能清理')
-                if service.readers.get(session_id):
-                    raise ValueError('报告正在下载或预览，请稍后重试')
                 session = await self.plugin.store.get_session(session_id)
                 if session is not None:
                     managed = await self.plugin.session_manager.active_for_group(session.group_id)
                     if managed and managed.session.id == session.id:
                         raise ValueError('该场次仍在运行或收尾，暂不能清理报告')
                 await service.report_directory(session_id)
-                count = self.plugin.application.cleanup_reports(session_id)
-            return {'removed': count}
+                # 生成与读取的互斥由应用层守卫裁决，群命令走同一条路径。
+                result = self.plugin.application.cleanup_reports(session_id)
+            return {'removed': result.removed, 'skipped': result.skipped}
         if endpoint in {'reports/download','reports/preview'}:
             session_id = query.get('session_id','')
             # 读取期间禁止清理删除目录；单文件下载还会先打开文件句柄。
-            async with service.reading(session_id):
+            with service.reading(session_id):
                 path = await service.report_directory(session_id)
                 return await (self.download(path) if endpoint.endswith('download') else self.preview_report(path))
         if endpoint == 'thumbnail':

@@ -155,3 +155,50 @@ class PersistenceTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory) / "vote.db"))
+
+    def test_legacy_votes_score_bound_is_rebuilt_without_losing_history(self):
+        legacy_schema = """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, short_id TEXT NOT NULL, group_id TEXT NOT NULL, umo TEXT NOT NULL,
+            project_name TEXT NOT NULL, project_path TEXT NOT NULL, status TEXT NOT NULL,
+            interval_seconds INTEGER NOT NULL, final_grace_seconds INTEGER NOT NULL,
+            current_index INTEGER NOT NULL, candidate_count INTEGER NOT NULL, output_path TEXT,
+            created_at TEXT, started_at TEXT, finished_at TEXT, ai_summary TEXT, error_message TEXT
+        );
+        CREATE TABLE candidates (
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL, display_index INTEGER NOT NULL,
+            source_relative_path TEXT NOT NULL, source_filename TEXT NOT NULL, display_title TEXT NOT NULL,
+            sequence_number INTEGER, source_size INTEGER NOT NULL, send_status TEXT NOT NULL, sent_at TEXT
+        );
+        CREATE TABLE votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, candidate_id TEXT NOT NULL,
+            voter_id TEXT NOT NULL, voter_name TEXT NOT NULL,
+            score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 9),
+            source_type TEXT NOT NULL, message_id TEXT, created_at TEXT, updated_at TEXT,
+            UNIQUE(session_id, candidate_id, voter_id)
+        );
+        INSERT INTO sessions (id, short_id, group_id, umo, project_name, project_path, status,
+            interval_seconds, final_grace_seconds, current_index, candidate_count)
+            VALUES ('s1', 'A7F3', 'g1', 'umo', 'project', '/tmp/project', 'RUNNING', 5, 20, 1, 1);
+        INSERT INTO candidates (id, session_id, display_index, source_relative_path, source_filename,
+            display_title, sequence_number, source_size, send_status)
+            VALUES ('c1', 's1', 1, 'one.png', 'one.png', 'One', NULL, 1, 'sent');
+        INSERT INTO votes (session_id, candidate_id, voter_id, voter_name, score, source_type, created_at, updated_at)
+            VALUES ('s1', 'c1', 'u1', 'Alice', 9, 'current_window', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00');
+        """
+
+        async def scenario(database_path):
+            connection = sqlite3.connect(str(database_path))
+            connection.executescript(legacy_schema)
+            connection.commit()
+            connection.close()
+            store = SQLiteStore(database_path)
+            await store.initialize()
+            self.assertEqual([item.score for item in await store.list_votes("s1")], [9])
+            previous = await store.upsert_vote(Vote(None, "s1", "c1", "u2", "Bob", 10, VoteSource.CURRENT_WINDOW))
+            self.assertIsNone(previous)
+            self.assertEqual(sorted(item.score for item in await store.list_votes("s1")), [9, 10])
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "vote.db"))

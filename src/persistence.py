@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+from .logging_utils import get_logger
 from .models import Candidate, SendStatus, Session, SessionStatus, Vote, VoteSource
+
+
+logger = get_logger()
 
 
 """同一用户对同一张图重复投票时的合并策略：SQL 片段按策略白名单拼接。"""
@@ -15,6 +20,27 @@ VOTE_POLICIES = {
     "max_score": ("MAX(votes.score, excluded.score)", "CASE WHEN excluded.score >= votes.score THEN 1 ELSE 0 END"),
     "min_score": ("MIN(votes.score, excluded.score)", "CASE WHEN excluded.score <= votes.score THEN 1 ELSE 0 END"),
 }
+
+
+"""配置允许的最高分（config.validate 里是 100）；votes 表的 CHECK 用它，老库按这个上限重建。"""
+SCORE_UPPER_BOUND = 100
+
+VOTES_TABLE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS votes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+    voter_id TEXT NOT NULL,
+    voter_name TEXT NOT NULL,
+    score INTEGER NOT NULL CHECK(score BETWEEN 0 AND %d),
+    source_type TEXT NOT NULL,
+    message_id TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    UNIQUE(session_id, candidate_id, voter_id)
+);
+CREATE INDEX IF NOT EXISTS idx_votes_session_candidate ON votes(session_id, candidate_id);
+""" % SCORE_UPPER_BOUND
 
 
 SCHEMA = """
@@ -58,21 +84,7 @@ CREATE TABLE IF NOT EXISTS candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_session ON candidates(session_id);
 
-CREATE TABLE IF NOT EXISTS votes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
-    voter_id TEXT NOT NULL,
-    voter_name TEXT NOT NULL,
-    score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 9),
-    source_type TEXT NOT NULL,
-    message_id TEXT,
-    created_at TEXT,
-    updated_at TEXT,
-    UNIQUE(session_id, candidate_id, voter_id)
-);
-CREATE INDEX IF NOT EXISTS idx_votes_session_candidate ON votes(session_id, candidate_id);
-"""
+""" + VOTES_TABLE_SCHEMA
 
 
 class SQLiteStore:
@@ -115,6 +127,35 @@ class SQLiteStore:
             for name, statement in columns:
                 if name not in existing:
                     connection.execute(statement)
+        self._migrate_votes_score_bound()
+
+    def _migrate_votes_score_bound(self) -> None:
+        """老库的 votes 表带 score BETWEEN 0 AND 9 的 CHECK，10 分票会被数据库直接拒绝。
+
+        SQLite 改不了 CHECK 约束，只能重建表；历史行与 UNIQUE 索引原样保留。
+        """
+        connection = self._require_connection()
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'votes'"
+        ).fetchone()
+        ddl = str(row["sql"] or "") if row is not None else ""
+        match = re.search(r"CHECK\s*\(\s*score\s+BETWEEN\s+0\s+AND\s+(\d+)\s*\)", ddl, re.IGNORECASE)
+        if match is None or int(match.group(1)) >= SCORE_UPPER_BOUND:
+            return
+        logger.warning(
+            "votes 表的评分上限是 %s，低于当前支持的 %d；重建该表以支持更高分制（历史票保留）",
+            match.group(1),
+            SCORE_UPPER_BOUND,
+        )
+        connection.execute("ALTER TABLE votes RENAME TO votes_legacy")
+        connection.executescript(VOTES_TABLE_SCHEMA)
+        connection.execute(
+            "INSERT INTO votes (id, session_id, candidate_id, voter_id, voter_name, score, source_type, message_id, created_at, updated_at)"
+            " SELECT id, session_id, candidate_id, voter_id, voter_name, score, source_type, message_id, created_at, updated_at"
+            " FROM votes_legacy"
+        )
+        connection.execute("DROP TABLE votes_legacy")
+        connection.commit()
 
     async def close(self) -> None:
         async with self._lock:

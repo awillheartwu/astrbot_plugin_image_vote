@@ -172,10 +172,10 @@ def get_message_id(event: Any) -> str:
 
 
 def get_sender_display_name(event: Any) -> str:
-    """投票人显示名：优先 QQ 昵称，其次群名片。
+    """投票人显示名：优先群名片（群里显示的就是它），其次 QQ 昵称。
 
-    AstrBot 的转换层用的是 card or nickname（群名片优先），而群里同一人常把名片设成
-    符号而昵称才是常用名，所以这里反过来读原始事件的 nickname。
+    原始事件里两个字段都有：名片为空或没设时会退回昵称；有些人把名片设成符号（如「。」），
+    那种情况只能按对方实际设置显示。
     """
     raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
     sender = None
@@ -187,7 +187,7 @@ def get_sender_display_name(event: Any) -> str:
         except Exception:
             sender = None
     if isinstance(sender, dict):
-        for key in ("nickname", "card"):
+        for key in ("card", "nickname"):
             value = sender.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()

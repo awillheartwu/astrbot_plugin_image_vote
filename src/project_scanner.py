@@ -17,6 +17,8 @@ SCREENSHOT_RE = re.compile(
     re.IGNORECASE,
 )
 NATURAL_PART_RE = re.compile(r"(\d+)")
+# 采集流水线会给重跑/回退的图追加标记，如「- 30279726 - reset」；展示标题应剥掉这些段
+_TITLE_SUFFIX_RE = re.compile(r"\s*-\s*(?:reset(?:[-_ ]?\d+)?|[0-9a-f]{6,}|\d{4,})\s*$", re.IGNORECASE)
 
 
 def natural_key(value: str) -> Tuple[object, ...]:
@@ -29,11 +31,21 @@ def natural_key(value: str) -> Tuple[object, ...]:
 def parse_image_filename(filename: str) -> Optional[Tuple[str, Optional[int]]]:
     match = SCREENSHOT_RE.match(filename)
     if match:
-        return match.group("title").strip(), int(match.group("seq"))
+        return clean_display_title(match.group("title")), int(match.group("seq"))
     suffix = Path(filename).suffix.lower()
     if suffix not in IMAGE_EXTENSIONS:
         return None
     return Path(filename).stem, None
+
+
+def clean_display_title(title: str) -> str:
+    """剥掉标题尾部的流水线标记（哈希、reset、重试序号），只在还剩内容时才剥。"""
+    value = (title or "").strip()
+    while True:
+        stripped = _TITLE_SUFFIX_RE.sub("", value).strip()
+        if stripped == value or not stripped:
+            return value
+        value = stripped
 
 
 def _is_ignored(path: Path) -> bool:

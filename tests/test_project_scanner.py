@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.project_scanner import scan_project
+from src.project_scanner import parse_image_filename, scan_project
 from src.project_service import ProjectService
 
 
@@ -80,3 +80,20 @@ class ProjectScannerTest(unittest.TestCase):
             self.assertEqual(by_name["Cass-废土风格.png"], "Cassandra")
             self.assertEqual(by_name["Aurora-老年版本.png"], "Cassandra")
             self.assertEqual(by_name["Aurora-现代版本.png"], "Aurora")
+    def test_pipeline_markers_are_stripped_from_display_title(self):
+        cases = {
+            "screenshot0020 - Vess - 30279726 - reset-1.png": ("Vess", 20),
+            "screenshot0018 - Jade - da0ee2fb.png": ("Jade", 18),
+            "screenshot0007 - Keodele - dbf95d0e - reset-2.png": ("Keodele", 7),
+            "screenshot0001 - Celine - 125e896f.png": ("Celine", 1),
+        }
+        for filename, expected in cases.items():
+            self.assertEqual(parse_image_filename(filename), expected, filename)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for filename in cases:
+                (root / filename).write_bytes(b"image")
+            snapshot = scan_project(root)
+            by_name = {item.source_filename: (item.display_title, item.character) for item in snapshot.candidates}
+            self.assertEqual(by_name["screenshot0020 - Vess - 30279726 - reset-1.png"], ("Vess", "Vess"))
+            self.assertEqual(by_name["screenshot0007 - Keodele - dbf95d0e - reset-2.png"], ("Keodele", "Keodele"))

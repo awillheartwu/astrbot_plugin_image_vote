@@ -196,7 +196,8 @@
     return `<div class="split"><div class="table-wrap"><table><thead><tr><th>排名</th><th>图片</th><th>均分 / ${s.score_max}</th><th>票数</th></tr></thead><tbody>${list.map((r) => `<tr class="${r.candidate_id === selected ? "selected" : ""}"><td>${r.rank ?? "—"}</td><td><div class="item-cell">${img(r, "thumb")}<div><button class="row-choice" data-select="${esc(r.candidate_id)}">${title(r)}</button><small>#${r.display_index}</small><div>${badge(r)}</div></div></div></td><td>${avg(r.average_score)}</td><td>${r.vote_count}</td></tr>`).join("")}</tbody></table></div>${detail(byId.get(selected))}</div>`;
   }
   function images() {
-    return `<div class="toolbar"><input id="image-search" type="search" aria-label="搜索图片名称" placeholder="搜索图片名称" value="${esc(query)}"><label>排序<select id="image-sort"><option value="rank">排名</option><option value="index">原始顺序</option><option value="votes">票数</option><option value="std">分歧</option></select></label><select id="image-filter" aria-label="筛选图片"><option value="all">全部图片</option><option value="few">少量评分</option><option value="zero">已展示未获票</option><option value="failed">发送失败</option><option value="pending">未展示</option></select><div class="view-controls"><button data-layout="gallery" aria-pressed="${layout === "gallery"}">图册</button><button data-layout="list" aria-pressed="${layout === "list"}">列表</button></div><span id="result-count" class="count">${filtered().length} / ${rows.length} 张</span></div><div id="results">${results()}</div>`;
+    const voted = rows.filter((r) => (r.vote_count || 0) > 0).length;
+    return `<p class="page-summary">共 ${rows.length} 张图 · 已展示 ${m.sent_count ?? rows.length} 张 · ${m.total_valid_votes ?? 0} 张有效票 · ${m.unique_voters ?? 0} 位参与者 · 其中 ${voted} 张有票</p><div class="toolbar"><input id="image-search" type="search" aria-label="搜索图片名称" placeholder="搜索图片名称" value="${esc(query)}"><label>排序<select id="image-sort"><option value="rank">排名</option><option value="index">原始顺序</option><option value="votes">票数</option><option value="std">分歧</option></select></label><select id="image-filter" aria-label="筛选图片"><option value="all">全部图片</option><option value="few">少量评分</option><option value="zero">已展示未获票</option><option value="failed">发送失败</option><option value="pending">未展示</option></select><div class="view-controls"><button data-layout="gallery" aria-pressed="${layout === "gallery"}">图册</button><button data-layout="list" aria-pressed="${layout === "list"}">列表</button></div><span id="result-count" class="count">${filtered().length} / ${rows.length} 张</span></div><div id="results">${results()}</div>`;
   }
   function personMenu() {
     return (
@@ -235,7 +236,8 @@
       )}</div><p class="report-note">评分覆盖以成功展示的图片数为分母。这里不展示完整改票历史。</p>`;
   }
   function peoplePage() {
-    return `<div class="people-layout"><aside><input id="people-search" type="search" placeholder="搜索参与者" aria-label="搜索参与者" value="${esc(personQuery)}"><div id="people-menu" class="people-menu">${personMenu()}</div></aside><section id="person-detail">${personDetail()}</section></div>`;
+    const rated = people.reduce((sum, p) => sum + (p.vote_count || 0), 0);
+    return `<p class="page-summary">${people.length} 位参与者 · 共 ${rows.length} 张图 · 个人评分合计 ${rated} 张</p><div class="people-layout"><aside><input id="people-search" type="search" placeholder="搜索参与者" aria-label="搜索参与者" value="${esc(personQuery)}"><div id="people-menu" class="people-menu">${personMenu()}</div></aside><section id="person-detail">${personDetail()}</section></div>`;
   }
   function footer() {
     return `<details class="method"><summary>统计口径与场次信息</summary><p>每人每图保留一条有效评分。排名按平均分、票数、原始顺序排列。零票不排名；少于 ${low} 票提醒样本较少。标准差使用总体公式，单票不称为一致认可。覆盖率衡量本轮参与者对已展示图片的填写情况，不是全群参与率。</p><p>会话 ${esc(s.short_id)}${s.group_id ? " · 群 " + esc(s.group_id) : ""} · ${esc(s.status)}${m.legacy_unexposed_votes ? " · " + m.legacy_unexposed_votes + "张历史未展示图片评分已从覆盖率排除" : ""}</p>${d.fallback_reason ? "<p>单文件超限，已回退目录版。请保留完整目录。</p>" : ""}</details>`;

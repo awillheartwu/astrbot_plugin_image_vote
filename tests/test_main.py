@@ -337,7 +337,7 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
-    def test_voter_name_prefers_nickname_over_group_card(self):
+    def test_voter_name_prefers_group_card_over_nickname(self):
         from src.astrbot_compat import get_sender_display_name
 
         def event(card, nickname, with_raw=True):
@@ -348,8 +348,8 @@ class MainTest(unittest.TestCase):
             # AstrBot 的 get_sender_name 是 card or nickname
             return SimpleNamespace(message_obj=message_obj, get_sender_name=lambda: card or nickname)
 
-        # 真实场景：昵称"黑白星"、群名片"。"，报告要显示昵称
-        self.assertEqual(get_sender_display_name(event("。", "黑白星")), "黑白星")
-        self.assertEqual(get_sender_display_name(event("无名片", "")), "无名片")
-        self.assertEqual(get_sender_display_name(event("无名片", None)), "无名片")
+        # 真实场景：群名片"雾舞(朱红轻飞溅)"、昵称"雾舞骛坞雾吾屋"，报告要显示群名片
+        self.assertEqual(get_sender_display_name(event("雾舞(朱红轻飞溅)", "雾舞骛坞雾吾屋")), "雾舞(朱红轻飞溅)")
+        self.assertEqual(get_sender_display_name(event("", "黑白星")), "黑白星")
+        self.assertEqual(get_sender_display_name(event(None, "黑白星")), "黑白星")
         self.assertEqual(get_sender_display_name(event("。", "黑白星", with_raw=False)), "。")

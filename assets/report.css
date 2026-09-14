@@ -1207,6 +1207,11 @@ dialog.lightbox img {
 .report-body {
   min-height: 70vh;
 }
+.page-summary {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .report-view-nav {
   display: flex;
   gap: 20px;

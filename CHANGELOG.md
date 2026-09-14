@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.3 - 2026-09-15
+
+- 修复插件日志不进面板：AstrBot 4.27+ 的 `astrbot.api.logger` 是按调用方动态解析的代理对象，不是 `logging.Logger`，原先的 isinstance 判断失败后退回普通 logger，INFO 级日志（计票、忽略原因、迁移告警）全部丢失。
+- 现在优先用 `LogManager.get_plugin_logger` 取插件专用 logger，它挂着面板的日志队列 handler；取不到再退回标准 logger，保证本地测试可用。
+- 新增 logger 解析的单元测试（模拟 AstrBot 环境与无 AstrBot 的本地环境），测试总数 105 → 107。
+
 ## 0.12.2 - 2026-09-15
 
 - 修复老库 10 分票被数据库丢弃：`votes` 表残留 `CHECK(score BETWEEN 0 AND 9)`，1-10 分制下打 10 分的票会触发约束错误、整票静默丢失（真机日志实证：一场 15 张的投票丢了 7 票）。SQLite 无法修改 CHECK，启动时按当前上限重建该表，历史票与唯一索引原样保留。

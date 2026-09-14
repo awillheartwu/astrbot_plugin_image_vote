@@ -23,24 +23,35 @@ class VoteCollectorTest(unittest.TestCase):
         parser = VoteParser()
         self.assertEqual(parser.parse("1"), 1)
         self.assertEqual(parser.parse(" 4 "), 4)
-        for value in ("0", "5", "03", "3分", "评分3", "3.0", "1 2", "👍3"):
+        for value in ("0", "5", "03", "评分3", "3.0", "1 2", "👍3"):
             self.assertIsNone(parser.parse(value))
+        self.assertEqual(parser.parse("3分"), 3)
 
     def test_parser_accepts_two_digits_when_range_allows(self):
         parser = VoteParser(1, 10)
         self.assertEqual(parser.parse("10"), 10)
         self.assertEqual(parser.parse(" 9 "), 9)
-        for value in ("11", "05", "0", "100", "10分"):
+        for value in ("11", "05", "0", "100"):
             self.assertIsNone(parser.parse(value))
+        self.assertEqual(parser.parse("10分"), 10)
         five = VoteParser(1, 5)
         self.assertEqual(five.parse("5"), 5)
+        self.assertEqual(five.parse("5分"), 5)
         self.assertIsNone(five.parse("6"))
         self.assertIsNone(five.parse("10"))
+
+    def test_parser_accepts_score_with_suffix_but_rejects_sentences(self):
+        parser = VoteParser(1, 10)
+        self.assertEqual(parser.parse("8分"), 8)
+        self.assertEqual(parser.parse(" 8 分 "), 8)
+        self.assertEqual(parser.parse("８分"), 8)
+        for value in ("8分熟", "分8", "8 分 9", "打了8分", "8分！"):
+            self.assertIsNone(parser.parse(value), value)
 
     def test_parser_normalizes_full_width_digits(self):
         self.assertEqual(VoteParser(1, 4).parse("３"), 3)
         self.assertEqual(VoteParser(1, 10).parse("１０"), 10)
-        self.assertIsNone(VoteParser(1, 4).parse("３分"))
+        self.assertEqual(VoteParser(1, 4).parse("３分"), 3)
 
     def test_current_window_routes_to_active_candidate(self):
         session = Session("session-1", "A7F3", "group-1", "umo", "project", "/tmp/project", SessionStatus.RUNNING)

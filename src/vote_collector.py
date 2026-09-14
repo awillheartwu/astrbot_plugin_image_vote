@@ -9,20 +9,28 @@ from .reply_resolver import ReplyPayload, ReplyResolver
 
 
 class VoteParser:
+    _SCORE_PATTERN = re.compile(r"^([0-9]+)(?:\s*分)?$")
+
     def __init__(self, score_min: int = 1, score_max: int = 4):
         self.score_min = score_min
         self.score_max = score_max
         self.score_digits = max(1, len(str(max(score_max, 0))))
 
-    def parse(self, text: str) -> Optional[int]:
+    def extract_digits(self, text: str) -> Optional[str]:
+        """整条消息是分数形式时返回数字部分（支持 8 与 8分 两种写法），否则 None。"""
         value = unicodedata.normalize("NFKC", text or "").strip()
-        if not value or len(value) > self.score_digits:
+        if not value:
             return None
-        if not re.fullmatch(r"[0-9]+", value):
+        match = self._SCORE_PATTERN.match(value)
+        return match.group(1) if match else None
+
+    def parse(self, text: str) -> Optional[int]:
+        digits = self.extract_digits(text)
+        if digits is None or len(digits) > self.score_digits:
             return None
-        if len(value) > 1 and value.startswith("0"):
+        if len(digits) > 1 and digits.startswith("0"):
             return None
-        score = int(value)
+        score = int(digits)
         if self.score_min <= score <= self.score_max:
             return score
         return None
@@ -59,12 +67,12 @@ class VoteRouter:
     ) -> Tuple[Optional[VoteDecision], Optional[str]]:
         """返回 (决策, 忽略原因)。原因只在「看起来像投票但没收下」时给出，方便事后对账。"""
         parser = self._parser_for(session)
-        raw = unicodedata.normalize("NFKC", text or "").strip()
+        digits = parser.extract_digits(text)
         score = parser.parse(text)
         if score is None:
-            if not raw or not raw.isdigit():
+            if digits is None:
                 return None, None
-            if len(raw) > 1 and raw.startswith("0"):
+            if len(digits) > 1 and digits.startswith("0"):
                 return None, "前导零不识别"
             return None, "超出评分范围 %d-%d" % (session.score_min, session.score_max)
         if session.status not in {SessionStatus.RUNNING, SessionStatus.PAUSED}:

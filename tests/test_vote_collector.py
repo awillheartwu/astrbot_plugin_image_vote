@@ -80,3 +80,27 @@ class VoteCollectorTest(unittest.TestCase):
         decision = router.route("10", wide, active, {10: active})
         self.assertIsNotNone(decision)
         self.assertEqual(decision.score, 10)
+
+    def test_route_reports_why_a_vote_was_not_counted(self):
+        running = Session(
+            "session-1", "A7F3", "group-1", "umo", "project", "/tmp/project",
+            SessionStatus.RUNNING, score_min=1, score_max=10,
+        )
+        finished = Session(
+            "session-1", "A7F3", "group-1", "umo", "project", "/tmp/project",
+            SessionStatus.COMPLETED, score_min=1, score_max=10,
+        )
+        active = candidate(10)
+        router = VoteRouter(VoteParser(1, 10))
+        self.assertEqual(router.route_with_reason("99", running, active, {10: active}), (None, "超出评分范围 1-10"))
+        self.assertEqual(router.route_with_reason("07", running, active, {10: active})[1], "前导零不识别")
+        self.assertEqual(router.route_with_reason("这图不错", running, active, {10: active}), (None, None))
+        self.assertEqual(router.route_with_reason("4", finished, active, {10: active})[1], "本场不在收票状态（COMPLETED）")
+        self.assertEqual(router.route_with_reason("4", running, None, {10: active})[1], "还没有成功发送的图片")
+        stale = ReplyPayload(message_str="[投票 003/010 · OLD1]")
+        decision, reason = router.route_with_reason("4", running, active, {10: active}, stale)
+        self.assertIsNone(decision)
+        self.assertEqual(reason, "引用的消息不是本场投票图")
+        decision, reason = router.route_with_reason("5", running, active, {10: active})
+        self.assertIsNotNone(decision)
+        self.assertIsNone(reason)

@@ -171,6 +171,29 @@ def get_message_id(event: Any) -> str:
     return str(value or "")
 
 
+def get_sender_display_name(event: Any) -> str:
+    """投票人显示名：优先群名片（群里看到的就是它），其次 QQ 昵称。
+
+    AstrBot 的 aiocqhttp 适配器按 nickname 优先构建成员信息，群名片只出现在原始事件里，
+    所以想跟群里显示一致就得自己读 sender.card。
+    """
+    raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
+    sender = None
+    if isinstance(raw, dict):
+        sender = raw.get("sender")
+    elif raw is not None and hasattr(raw, "get"):
+        try:
+            sender = raw.get("sender")
+        except Exception:
+            sender = None
+    if isinstance(sender, dict):
+        for key in ("card", "nickname"):
+            value = sender.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return get_sender_name(event)
+
+
 def get_self_id(event: Any) -> str:
     message_obj = getattr(event, "message_obj", None)
     value = getattr(message_obj, "self_id", None) or getattr(event, "self_id", None)

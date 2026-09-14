@@ -103,6 +103,7 @@ class VoteApplication:
                 display_title=item.display_title,
                 sequence_number=item.sequence_number,
                 source_size=item.source_size,
+                character=item.character,
             )
             for item in snapshot.candidates
         )
@@ -609,11 +610,22 @@ class VoteApplication:
             return None
         if (session.score_min, session.score_max) != (self.config.score_min, self.config.score_max):
             self._warn_range_mismatch(session)
-        decision = self.router.route(text, session, active_candidate, {item.display_index: item for item in candidates}, reply)
+        decision, skip_reason = self.router.route_with_reason(
+            text, session, active_candidate, {item.display_index: item for item in candidates}, reply
+        )
         if decision is None:
+            if skip_reason:
+                logger.info(
+                    "忽略 %s(%s) 的「%s」：%s（session=%s）",
+                    voter_name,
+                    voter_id,
+                    (text or "").strip(),
+                    skip_reason,
+                    session.short_id,
+                )
             return None
         now = utc_now()
-        await self.store.upsert_vote(
+        previous = await self.store.upsert_vote(
             Vote(
                 id=None,
                 session_id=session.id,
@@ -628,12 +640,16 @@ class VoteApplication:
             ),
             policy=self.config.same_user_vote_policy,
         )
-        logger.debug(
-            "记录投票：session=%s candidate=%s voter=%s score=%d source=%s",
+        candidate = next((item for item in candidates if item.id == decision.candidate_id), None)
+        logger.info(
+            "记录投票 session=%s 第%s张 %s：%s(%s) %s分 来源=%s%s",
             session.short_id,
-            decision.candidate_id,
+            candidate.display_index if candidate is not None else "?",
+            candidate.display_title if candidate is not None else decision.candidate_id,
+            voter_name,
             voter_id,
             decision.score,
             decision.source_type.value,
+            "" if previous is None else "，覆盖旧票 %d 分" % previous,
         )
         return decision

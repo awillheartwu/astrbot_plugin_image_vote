@@ -136,3 +136,22 @@ class PersistenceTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory) / "vote.db"))
+
+    def test_vote_upsert_returns_the_overwritten_score(self):
+        async def scenario(database_path):
+            store = SQLiteStore(database_path)
+            await store.initialize()
+            await store.save_session(
+                Session("s1", "A7F3", "g1", "umo", "project", "/tmp/project", SessionStatus.RUNNING, candidate_count=1)
+            )
+            await store.save_candidates([Candidate("c1", "s1", 1, "one.png", "one.png", "One", None, 1)])
+            first = await store.upsert_vote(Vote(None, "s1", "c1", "u1", "Alice", 2, VoteSource.CURRENT_WINDOW))
+            second = await store.upsert_vote(Vote(None, "s1", "c1", "u1", "Alice", 5, VoteSource.CURRENT_WINDOW))
+            third = await store.upsert_vote(Vote(None, "s1", "c1", "u2", "Bob", 3, VoteSource.CURRENT_WINDOW))
+            self.assertIsNone(first)
+            self.assertEqual(second, 2)
+            self.assertIsNone(third)
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "vote.db"))

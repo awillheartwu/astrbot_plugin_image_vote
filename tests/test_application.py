@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -780,3 +781,26 @@ class ApplicationTest(unittest.TestCase):
             asyncio.run(scenario(Path(directory), notified, generator, {"notify_on_finish": False}))
         self.assertEqual(notified, [])
         self.assertEqual(generator.calls, 1)
+
+    def test_prepare_session_keeps_manifest_character_for_report_grouping(self):
+        async def scenario(root):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            (project_root / "a.png").write_bytes(b"a")
+            (project_root / "b.png").write_bytes(b"b")
+            (project_root / "project.json").write_text(
+                json.dumps({"characters": {"黑白星": ["a.png", "b.png"]}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            config = VoteConfig.from_mapping({"input_root": str(input_root), "output_root": str(root / "reports")})
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            application = VoteApplication(config, ProjectService(input_root), store, SessionManager(), VoteRouter())
+            session = await application.prepare_session("g1", "umo", "demo")
+            candidates = await store.list_candidates(session.id)
+            self.assertEqual({item.character for item in candidates}, {"黑白星"})
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))

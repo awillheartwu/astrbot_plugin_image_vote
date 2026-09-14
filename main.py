@@ -46,6 +46,7 @@ get_message_id = _compat.get_message_id
 get_plugin_data_dir = _compat.get_plugin_data_dir
 get_sender_id = _compat.get_sender_id
 get_sender_name = _compat.get_sender_name
+get_sender_display_name = _compat.get_sender_display_name
 get_self_id = _compat.get_self_id
 get_unified_message_origin = _compat.get_unified_message_origin
 is_admin_event = _compat.is_admin_event
@@ -459,7 +460,7 @@ class ImageVotePlugin(Star):
             candidates,
             get_event_text(event),
             sender_id,
-            get_sender_name(event),
+            get_sender_display_name(event),
             active_candidate,
             reply=self.adapter.resolve_reply(event),
             message_id=get_message_id(event),

@@ -235,3 +235,18 @@ class MainTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
+
+    def test_voter_name_prefers_group_card_over_nickname(self):
+        from src.astrbot_compat import get_sender_display_name
+
+        def event(card, nickname, with_raw=True):
+            sender = SimpleNamespace(user_id="u1", nickname=nickname, card=card)
+            message_obj = SimpleNamespace(sender=sender)
+            if with_raw:
+                message_obj.raw_message = {"sender": {"user_id": "u1", "nickname": nickname, "card": card}}
+            return SimpleNamespace(message_obj=message_obj, get_sender_name=lambda: nickname)
+
+        self.assertEqual(get_sender_display_name(event("黑白星", "。")), "黑白星")
+        self.assertEqual(get_sender_display_name(event("", "。")), "。")
+        self.assertEqual(get_sender_display_name(event(None, "。")), "。")
+        self.assertEqual(get_sender_display_name(event("黑白星", "。", with_raw=False)), "。")

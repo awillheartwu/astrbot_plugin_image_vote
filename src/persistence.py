@@ -209,12 +209,18 @@ class SQLiteStore:
         )
         connection.commit()
 
-    async def upsert_vote(self, vote: Vote, policy: str = "last_wins") -> None:
+    async def upsert_vote(self, vote: Vote, policy: str = "last_wins") -> Optional[int]:
+        """写入投票；同一人同一图已有票时返回被覆盖的分数，否则返回 None。"""
         async with self._lock:
-            await asyncio.to_thread(self._upsert_vote_sync, vote, policy)
+            return await asyncio.to_thread(self._upsert_vote_sync, vote, policy)
 
-    def _upsert_vote_sync(self, vote: Vote, policy: str = "last_wins") -> None:
+    def _upsert_vote_sync(self, vote: Vote, policy: str = "last_wins") -> Optional[int]:
         connection = self._require_connection()
+        previous_row = connection.execute(
+            "SELECT score FROM votes WHERE session_id = ? AND candidate_id = ? AND voter_id = ?",
+            (vote.session_id, vote.candidate_id, vote.voter_id),
+        ).fetchone()
+        previous = int(previous_row["score"]) if previous_row is not None else None
         score_expression, wins_expression = VOTE_POLICIES.get(policy, VOTE_POLICIES["last_wins"])
         connection.execute(
             """INSERT INTO votes (
@@ -241,6 +247,7 @@ class SQLiteStore:
             ),
         )
         connection.commit()
+        return previous
 
     async def list_votes(self, session_id: str) -> List[Vote]:
         async with self._lock:

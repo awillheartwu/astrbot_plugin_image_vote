@@ -201,6 +201,69 @@ class MainTest(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_idle_group_messages_skip_repeated_store_queries(self):
+        class ChatEvent:
+            message_str = "随便聊聊"
+
+            def get_group_id(self):
+                return "g1"
+
+            def get_sender_id(self):
+                return "u1"
+
+        async def scenario(root):
+            plugin = ImageVotePlugin(TempContext(root))
+            await plugin.store.initialize()
+            calls = []
+            original = plugin.store.latest_session_for_group
+
+            async def counting(group_id):
+                calls.append(group_id)
+                return await original(group_id)
+
+            plugin.store.latest_session_for_group = counting
+            for _ in range(5):
+                self.assertIsNone(await plugin.on_group_message(ChatEvent()))
+            self.assertEqual(len(calls), 1, "无场次的群应只查一次库")
+            await plugin.store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_groups_outside_allowlist_do_not_touch_the_store(self):
+        class ChatEvent:
+            message_str = "闲聊"
+
+            def get_group_id(self):
+                return "g-other"
+
+            def get_sender_id(self):
+                return "u1"
+
+        class WhitelistContext(TempContext):
+            def get_config(self):
+                config = dict(super().get_config())
+                config["allowed_group_ids"] = ["g-allowed"]
+                return config
+
+        async def scenario(root):
+            plugin = ImageVotePlugin(WhitelistContext(root))
+            await plugin.store.initialize()
+            calls = []
+            original = plugin.store.latest_session_for_group
+
+            async def counting(group_id):
+                calls.append(group_id)
+                return await original(group_id)
+
+            plugin.store.latest_session_for_group = counting
+            self.assertIsNone(await plugin.on_group_message(ChatEvent()))
+            self.assertEqual(calls, [])
+            await plugin.store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
     def test_control_replies_describe_the_action(self):
         session = Session(
             "s1", "A1B2C3D4", "g1", "umo", "海滨之家", "/pictures/x", SessionStatus.RUNNING,

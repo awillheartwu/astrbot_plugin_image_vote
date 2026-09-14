@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -90,6 +91,10 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
 
+    # 群消息热路径的短路参数：没有未结束场次的群不必每条消息都查库、读配置。
+    GROUP_SESSION_CACHE_SECONDS = 5.0
+    CONFIG_CHECK_INTERVAL_SECONDS = 1.0
+
     def __init__(self, context: Any, config: Any = None):
         super().__init__(context)
         if ASTRBOT_AVAILABLE and EVENT_MESSAGE_TYPE_SOURCE is None:
@@ -100,6 +105,8 @@ class ImageVotePlugin(Star):
         self._page_config_object = config if callable(getattr(config, 'save_config', None)) else None
         # 报告读取、生成与清理的守卫在插件生命周期内只建一次，配置热更新重建应用层时继续沿用。
         self.report_activity = _activity_module.ReportActivity()
+        self._session_probe_cache: Dict[str, float] = {}
+        self._config_checked_at = 0.0
         self.workspace_api = None
         self.store = None
         self.session_manager = None
@@ -438,10 +445,12 @@ class ImageVotePlugin(Star):
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
     async def on_group_message(self, event: Any):
-        self._ensure_config()
         group_id = get_group_id(event)
         sender_id = get_sender_id(event)
         if sender_id and sender_id == get_self_id(event):
+            return None
+        self._ensure_config_throttled()
+        if not await self._group_needs_attention(group_id):
             return None
         managed = await self.session_manager.active_for_group(group_id)
         if managed is None:
@@ -473,6 +482,35 @@ class ImageVotePlugin(Star):
                     % (self._candidate_index(candidates, decision.candidate_id), decision.score)
                 )
         return None
+
+    def _ensure_config_throttled(self) -> None:
+        """群消息热路径上的配置检查最多每秒一次；指令路径仍用无节流的 _ensure_config。"""
+        now = time.monotonic()
+        if now - self._config_checked_at < self.CONFIG_CHECK_INTERVAL_SECONDS:
+            return
+        self._config_checked_at = now
+        self._ensure_config()
+
+    async def _group_needs_attention(self, group_id: str) -> bool:
+        """本群是否值得继续处理这条消息：有活跃场次，或有可恢复的暂停场次。
+
+        既没有场次、又不在白名单里的群直接退出，避免每条群消息都做一次 SQLite 查询。
+        只缓存「没有场次」这个结论：场次一开始就会出现在内存里的活跃表，不受缓存影响。
+        """
+        if await self.session_manager.active_for_group(group_id) is not None:
+            return True
+        if self.settings.allowed_group_ids and group_id not in self.settings.allowed_group_ids:
+            return False
+        now = time.monotonic()
+        checked_at = self._session_probe_cache.get(group_id)
+        if checked_at is not None and now - checked_at < self.GROUP_SESSION_CACHE_SECONDS:
+            return False
+        session = await self.store.latest_session_for_group(group_id)
+        if session is not None and session.status == SessionStatus.PAUSED:
+            self._session_probe_cache.pop(group_id, None)
+            return True
+        self._session_probe_cache[group_id] = now
+        return False
 
     async def terminate(self):
         if self.workspace_api is not None:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.4 - 2026-09-15
+
+- 修复单文件报告发不到群里：`send_file` 的降级分支把裸组件列表交给平台发送接口，触发 `list object has no attribute chain`，报告附件静默失败（群里只看到"报告已生成"，附件没来）。现在统一组装成 MessageChain。
+- 发送图片与纯文本的降级分支同样改为 MessageChain，避免同一类问题；确实不支持文件组件时抛出明确错误而不是静默降级。
+- 新增适配层回归测试（断言传出对象是 MessageChain、组件顺序为文本+文件），测试总数 107 → 108。
+
 ## 0.12.3 - 2026-09-15
 
 - 修复插件日志不进面板：AstrBot 4.27+ 的 `astrbot.api.logger` 是按调用方动态解析的代理对象，不是 `logging.Logger`，原先的 isinstance 判断失败后退回普通 logger，INFO 级日志（计票、忽略原因、迁移告警）全部丢失。

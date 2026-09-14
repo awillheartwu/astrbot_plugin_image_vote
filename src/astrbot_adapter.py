@@ -20,7 +20,7 @@ class AstrBotAdapter:
         except (ImportError, AttributeError):
             from astrbot.api.message_components import Image, Plain
 
-            chain = [Plain(text), Image.fromFileSystem(str(image_path))]
+            chain = self._message_chain([Plain(text), Image.fromFileSystem(str(image_path))])
         result = await self.context.send_message(umo, chain)
         if result is False:
             raise RuntimeError("AstrBot could not resolve unified message origin")
@@ -35,7 +35,7 @@ class AstrBotAdapter:
         except (ImportError, AttributeError):
             from astrbot.api.message_components import Plain
 
-            chain = [Plain(text)]
+            chain = self._message_chain([Plain(text)])
         result = await self.context.send_message(umo, chain)
         if result is False:
             raise RuntimeError("AstrBot could not resolve unified message origin")
@@ -44,16 +44,30 @@ class AstrBotAdapter:
         """把文件作为附件发送（单文件报告用），不同 AstrBot 版本的组件名不同，逐层降级。"""
         label = name or path.name
         try:
-            from astrbot.api.event import MessageChain
-
-            chain = MessageChain().message(label).file(str(path))
-        except (ImportError, AttributeError):
             from astrbot.api.message_components import File, Plain
 
-            chain = [Plain(label), File(name=label, file=str(path))]
+            chain = self._message_chain([Plain(label), File(name=label, file=str(path))])
+        except (ImportError, AttributeError, TypeError) as exc:
+            raise RuntimeError("当前 AstrBot 版本不支持发送文件组件：%s" % exc) from exc
         result = await self.context.send_message(umo, chain)
         if result is False:
             raise RuntimeError("AstrBot could not resolve unified message origin")
+
+    @staticmethod
+    def _message_chain(components: List[Any]) -> Any:
+        """把组件列表装成 MessageChain。
+
+        直接传 list 会在平台发送路径上炸（没有 .chain 属性），AstrBot 单文件报告发送
+        失败就是这个原因。
+        """
+        from astrbot.api.event import MessageChain
+
+        try:
+            return MessageChain(chain=list(components))
+        except TypeError:
+            chain = MessageChain()
+            chain.chain = list(components)
+            return chain
 
     def resolve_reply(self, event: Any) -> Optional[ReplyPayload]:
         message_obj = getattr(event, "message_obj", None)

@@ -48,3 +48,66 @@ class AstrBotAdapterTest(unittest.TestCase):
         )
         candidate = Candidate("c1", "s1", 3, "three.png", "three.png", "Three", None, 1)
         self.assertIn("回复 1-10 评分", build_vote_message(session, candidate))
+
+    def test_send_file_wraps_components_in_a_message_chain(self):
+        import sys
+        import types
+
+        captured = {}
+
+        class FakeMessageChain:
+            def __init__(self, chain=None):
+                self.chain = list(chain or [])
+
+        class FakeFile:
+            def __init__(self, name=None, file=None):
+                self.name = name
+                self.file_ = file
+
+        class FakePlain:
+            def __init__(self, text=""):
+                self.text = text
+
+        event_module = types.ModuleType("astrbot.api.event")
+        event_module.MessageChain = FakeMessageChain
+        components_module = types.ModuleType("astrbot.api.message_components")
+        components_module.File = FakeFile
+        components_module.Plain = FakePlain
+        api_module = types.ModuleType("astrbot.api")
+        api_module.event = event_module
+        api_module.message_components = components_module
+        astrbot_module = types.ModuleType("astrbot")
+        astrbot_module.api = api_module
+        keys = ("astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.message_components")
+        saved = {key: sys.modules.get(key) for key in keys}
+        sys.modules.update(
+            {
+                "astrbot": astrbot_module,
+                "astrbot.api": api_module,
+                "astrbot.api.event": event_module,
+                "astrbot.api.message_components": components_module,
+            }
+        )
+        try:
+            class Context:
+                async def send_message(self, umo, chain):
+                    captured["umo"] = umo
+                    captured["chain"] = chain
+                    return True
+
+            adapter = AstrBotAdapter(Context())
+            asyncio.run(
+                adapter.send_file("group:1", Path("/tmp/reports/demo/index.html"), name="demo.html")
+            )
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    sys.modules.pop(key, None)
+                else:
+                    sys.modules[key] = value
+
+        chain = captured["chain"]
+        self.assertIsInstance(chain, FakeMessageChain)
+        self.assertEqual([type(item).__name__ for item in chain.chain], ["FakePlain", "FakeFile"])
+        self.assertEqual(chain.chain[0].text, "demo.html")
+        self.assertEqual(chain.chain[1].file_, "/tmp/reports/demo/index.html")

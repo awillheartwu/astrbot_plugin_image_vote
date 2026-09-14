@@ -10,6 +10,8 @@ from .reply_resolver import ReplyPayload, ReplyResolver
 
 class VoteParser:
     _SCORE_PATTERN = re.compile(r"^([0-9]+)(?:\s*分)?$")
+    # AstrBot 会把「@其他用户」拼进 message_str，形如 " @昵称(qq) "，投票时应忽略
+    _AT_FRAGMENT = re.compile(r"@[^\s@]*\(\d+\)")
 
     def __init__(self, score_min: int = 1, score_max: int = 4):
         self.score_min = score_min
@@ -19,6 +21,8 @@ class VoteParser:
     def extract_digits(self, text: str) -> Optional[str]:
         """整条消息是分数形式时返回数字部分（支持 8 与 8分 两种写法），否则 None。"""
         value = unicodedata.normalize("NFKC", text or "").strip()
+        if self._AT_FRAGMENT.search(value):
+            value = self._AT_FRAGMENT.sub(" ", value).strip()
         if not value:
             return None
         match = self._SCORE_PATTERN.match(value)

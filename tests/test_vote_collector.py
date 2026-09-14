@@ -48,6 +48,13 @@ class VoteCollectorTest(unittest.TestCase):
         for value in ("8分熟", "分8", "8 分 9", "打了8分", "8分！"):
             self.assertIsNone(parser.parse(value), value)
 
+    def test_parser_ignores_astrbot_at_fragments(self):
+        parser = VoteParser(1, 10)
+        self.assertEqual(parser.parse(" @。(783607206) 7 "), 7)
+        self.assertEqual(parser.parse("@某人(123456) 8分"), 8)
+        self.assertEqual(parser.parse("8 @某人(123456)"), 8)
+        self.assertIsNone(parser.parse("@某人(123456)"))
+
     def test_parser_normalizes_full_width_digits(self):
         self.assertEqual(VoteParser(1, 4).parse("３"), 3)
         self.assertEqual(VoteParser(1, 10).parse("１０"), 10)

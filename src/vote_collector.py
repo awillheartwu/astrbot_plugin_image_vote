@@ -4,6 +4,7 @@ import re
 import unicodedata
 from typing import Mapping, Optional, Tuple
 
+from .character_service import character_of
 from .models import Candidate, Session, SessionStatus, VoteDecision, VoteSource
 from .reply_resolver import ReplyPayload, ReplyResolver
 
@@ -87,10 +88,13 @@ class VoteRouter:
             quoted_candidate = self.reply_resolver.resolve_candidate(reply, session.short_id, candidates_by_index)
             if quoted_candidate is None:
                 return None, "引用的消息不是本场投票图"
-            return VoteDecision(quoted_candidate.id, score, VoteSource.QUOTED_REPLY), None
+            return VoteDecision(
+                quoted_candidate.id, character_of(quoted_candidate), score, VoteSource.QUOTED_REPLY
+            ), None
         if active_candidate is None:
             return None, "还没有成功发送的图片"
-        return VoteDecision(active_candidate.id, score, VoteSource.CURRENT_WINDOW), None
+        character = getattr(session, "active_character", None) or character_of(active_candidate)
+        return VoteDecision(active_candidate.id, character, score, VoteSource.CURRENT_WINDOW), None
 
     def _parser_for(self, session: Session) -> VoteParser:
         """计票范围以会话为准；运行中改配置只影响以后新建的会话。"""

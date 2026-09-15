@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Dict, Iterable, List
 
 from .models import Candidate, CandidateStatistics, CharacterStatistics, SessionStatistics, Vote
-from .project_scanner import derive_character
+from .character_service import character_of
 
 
 def _distribution(votes: Iterable[Vote], score_min: int, score_max: int) -> Dict[int, int]:
@@ -20,43 +20,36 @@ def _average(votes: List[Vote]):
     return sum(vote.score for vote in votes) / float(len(votes))
 
 
-def character_of(candidate: Candidate) -> str:
-    return candidate.character or derive_character(candidate.display_title) or candidate.display_title
-
-
 def calculate_statistics(
     candidates: Iterable[Candidate], votes: Iterable[Vote], score_min: int = 1, score_max: int = 4
 ) -> SessionStatistics:
     candidates_list = list(candidates)
     votes_list = list(votes)
-    by_candidate: Dict[str, List[Vote]] = defaultdict(list)
-    for vote in votes_list:
-        by_candidate[vote.candidate_id].append(vote)
+    candidate_by_id = {candidate.id: candidate for candidate in candidates_list}
 
     preliminary = []
     images_per_character: Dict[str, int] = defaultdict(int)
     votes_per_character: Dict[str, List[Vote]] = defaultdict(list)
     for candidate in candidates_list:
-        candidate_votes = by_candidate.get(candidate.id, [])
         character = character_of(candidate)
         images_per_character[character] += 1
-        votes_per_character[character].extend(candidate_votes)
         preliminary.append(
             CandidateStatistics(
                 candidate_id=candidate.id,
                 display_index=candidate.display_index,
                 display_title=candidate.display_title,
-                vote_count=len(candidate_votes),
-                average_score=_average(candidate_votes),
-                score_distribution=_distribution(candidate_votes, score_min, score_max),
+                vote_count=0,
+                average_score=None,
+                score_distribution=_distribution((), score_min, score_max),
             )
         )
+    for vote in votes_list:
+        candidate = candidate_by_id.get(vote.candidate_id)
+        character = vote.character or (character_of(candidate) if candidate is not None else "")
+        if character in images_per_character:
+            votes_per_character[character].append(vote)
 
-    ranked = sorted(
-        (item for item in preliminary if item.vote_count > 0),
-        key=lambda item: (-float(item.average_score), -item.vote_count, item.display_index),
-    )
-    rank_by_id = {item.candidate_id: index for index, item in enumerate(ranked, start=1)}
+    rank_by_id = {}
     finalized = tuple(
         CandidateStatistics(
             candidate_id=item.candidate_id,
@@ -78,13 +71,15 @@ def calculate_statistics(
             average_score=_average(items),
             score_distribution=_distribution(items, score_min, score_max),
         )
-        for name, items in votes_per_character.items()
+        for name in images_per_character
+        for items in (votes_per_character.get(name, []),)
     ]
     ranked_characters = sorted(
         (item for item in character_items if item.vote_count > 0),
         key=lambda item: (-float(item.average_score), -item.vote_count, item.character),
     )
     rank_by_character = {item.character: index for index, item in enumerate(ranked_characters, start=1)}
+    first_appearance = {name: index for index, name in enumerate(images_per_character)}
     characters = tuple(
         CharacterStatistics(
             character=item.character,
@@ -94,7 +89,14 @@ def calculate_statistics(
             score_distribution=item.score_distribution,
             rank=rank_by_character.get(item.character),
         )
-        for item in sorted(character_items, key=lambda entry: (entry.rank is None, entry.rank or 0, entry.character))
+        for item in sorted(
+            character_items,
+            key=lambda entry: (
+                rank_by_character.get(entry.character) is None,
+                rank_by_character.get(entry.character) or 0,
+                first_appearance[entry.character],
+            ),
+        )
     )
 
     overall_average = None
@@ -108,5 +110,6 @@ def calculate_statistics(
         overall_average_score=overall_average,
         candidates=finalized,
         characters=characters,
+        total_characters=len(images_per_character),
+        average_votes_per_character=(len(votes_list) / float(len(images_per_character))) if images_per_character else 0.0,
     )
-

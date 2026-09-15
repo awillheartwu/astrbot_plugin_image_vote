@@ -40,6 +40,11 @@ class VoteCollectorTest(unittest.TestCase):
         self.assertIsNone(five.parse("6"))
         self.assertIsNone(five.parse("10"))
 
+    def test_parser_accepts_zero_when_configured(self):
+        parser = VoteParser(0, 10)
+        self.assertEqual(parser.parse("0"), 0)
+        self.assertEqual(parser.parse("0分"), 0)
+
     def test_parser_accepts_score_with_suffix_but_rejects_sentences(self):
         parser = VoteParser(1, 10)
         self.assertEqual(parser.parse("8分"), 8)
@@ -65,6 +70,7 @@ class VoteCollectorTest(unittest.TestCase):
         active = candidate(10)
         decision = VoteRouter().route("3", session, active, {10: active})
         self.assertEqual(decision.candidate_id, active.id)
+        self.assertEqual(decision.character, active.display_title)
         self.assertEqual(decision.source_type, VoteSource.CURRENT_WINDOW)
 
     def test_quoted_vote_routes_to_quoted_candidate(self):
@@ -74,6 +80,7 @@ class VoteCollectorTest(unittest.TestCase):
         reply = ReplyPayload(message_str="[投票 003/010 · A7F3]")
         decision = VoteRouter().route("4", session, active, {3: quoted, 10: active}, reply)
         self.assertEqual(decision.candidate_id, quoted.id)
+        self.assertEqual(decision.character, quoted.display_title)
         self.assertEqual(decision.source_type, VoteSource.QUOTED_REPLY)
         invalid_reply = ReplyPayload(message_str="[投票 003/010 · OLD1]")
         self.assertIsNone(VoteRouter().route("4", session, active, {3: quoted, 10: active}, invalid_reply))

@@ -17,6 +17,54 @@ from src.vote_collector import VoteRouter
 
 
 class ApplicationTest(unittest.TestCase):
+    def test_character_batch_sends_contiguously_and_waits_after_last_image(self):
+        class RecordingControl:
+            stop_requested = False
+            finish_requested = False
+
+            def __init__(self):
+                self.waits = []
+
+            async def wait_if_paused(self):
+                return None
+
+            async def wait_for_interval(self, seconds):
+                self.waits.append(seconds)
+
+        async def scenario(root):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            for name in (
+                "screenshot0001 - A - aaaaaa.png",
+                "screenshot0002 - B - bbbbbb.png",
+                "screenshot0003 - A - cccccc.png",
+            ):
+                (project_root / name).write_bytes(b"x")
+            config = VoteConfig.from_mapping({"input_root": str(input_root), "output_root": str(root / "reports")})
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            observed = []
+
+            async def sender(session, candidate, image_path):
+                observed.append((candidate.character, candidate.sequence_number, session.active_character))
+
+            application = VoteApplication(
+                config, ProjectService(input_root), store, SessionManager(), VoteRouter(), sender=sender
+            )
+            session = await application.prepare_session("g1", "umo", "demo")
+            session.interval_seconds = 7
+            session.final_grace_seconds = 9
+            candidates = await store.list_candidates(session.id)
+            control = RecordingControl()
+            await application.run_session(session, candidates, control)
+            self.assertEqual(observed, [("A", 1, None), ("A", 3, "A"), ("B", 2, None)])
+            self.assertEqual(control.waits, [7, 9])
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
     def test_runner_sends_snapshot_in_order_and_finalizes(self):
         async def scenario(root):
             input_root = root / "projects"
@@ -369,7 +417,7 @@ class ApplicationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
-    def test_send_failure_keeps_previous_candidate_as_vote_target(self):
+    def test_character_transition_clears_previous_vote_target_before_next_send(self):
         async def scenario(root):
             input_root = root / "projects"
             project_root = input_root / "demo"
@@ -402,7 +450,8 @@ class ApplicationTest(unittest.TestCase):
             await application.sessions.start(session, runner)
             await asyncio.wait_for(third.wait(), timeout=2)
             persisted = await store.get_session(session.id)
-            self.assertEqual(persisted.active_candidate_id, candidates[0].id)
+            self.assertIsNone(persisted.active_candidate_id)
+            self.assertIsNone(persisted.active_character)
             await application.stop("g1")
             await store.close()
 
@@ -484,7 +533,7 @@ class ApplicationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
-    def test_next_wait_seconds_modes(self):
+    def test_next_wait_seconds_starts_after_character_send(self):
         async def scenario():
             base = VoteConfig.from_mapping({"input_root": "/a", "output_root": "/b"})
             application = VoteApplication(base, ProjectService(Path("/a")), None, SessionManager(), VoteRouter())
@@ -498,12 +547,12 @@ class ApplicationTest(unittest.TestCase):
             periodic = VoteConfig.from_mapping(
                 {"input_root": "/a", "output_root": "/b", "interval_includes_send_time": True}
             )
-            periodic_app = VoteApplication(
+            compatibility_app = VoteApplication(
                 periodic, ProjectService(Path("/a")), None, SessionManager(), VoteRouter()
             )
-            self.assertEqual(periodic_app._next_wait_seconds(session, False, 3.0), 2)
-            self.assertEqual(periodic_app._next_wait_seconds(session, False, 17.0), 0)
-            self.assertEqual(periodic_app._next_wait_seconds(session, True, 17.0), 20)
+            self.assertEqual(compatibility_app._next_wait_seconds(session, False, 3.0), 5)
+            self.assertEqual(compatibility_app._next_wait_seconds(session, False, 17.0), 5)
+            self.assertEqual(compatibility_app._next_wait_seconds(session, True, 17.0), 20)
 
         asyncio.run(scenario())
 

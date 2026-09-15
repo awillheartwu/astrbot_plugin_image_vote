@@ -166,6 +166,19 @@ def scan_project(project_path: Path, recursive: bool = False, session_id: str = 
             )
         )
 
+    # 投票以人物为单位：人物按首次出现的位置排序，人物内部保留原扫描顺序。
+    character_order: List[str] = []
+    by_character: Dict[str, List[Candidate]] = {}
+    for candidate in candidates:
+        name = candidate.character or candidate.display_title
+        if name not in by_character:
+            by_character[name] = []
+            character_order.append(name)
+        by_character[name].append(candidate)
+    candidates = [candidate for name in character_order for candidate in by_character[name]]
+    for display_index, candidate in enumerate(candidates, start=1):
+        candidate.display_index = display_index
+
     return ProjectSnapshot(
         project_name=project_path.name,
         project_path=str(project_path),

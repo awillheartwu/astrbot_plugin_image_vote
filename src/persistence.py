@@ -13,7 +13,7 @@ from .models import Candidate, SendStatus, Session, SessionStatus, Vote, VoteSou
 logger = get_logger()
 
 
-"""同一用户对同一张图重复投票时的合并策略：SQL 片段按策略白名单拼接。"""
+"""同一用户对同一人物重复投票时的合并策略：SQL 片段按策略白名单拼接。"""
 VOTE_POLICIES = {
     "last_wins": ("excluded.score", "1"),
     "first_wins": ("votes.score", "0"),
@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS votes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+    character_name TEXT NOT NULL,
     voter_id TEXT NOT NULL,
     voter_name TEXT NOT NULL,
     score INTEGER NOT NULL CHECK(score BETWEEN 0 AND %d),
@@ -37,7 +38,7 @@ CREATE TABLE IF NOT EXISTS votes (
     message_id TEXT,
     created_at TEXT,
     updated_at TEXT,
-    UNIQUE(session_id, candidate_id, voter_id)
+    UNIQUE(session_id, character_name, voter_id)
 );
 CREATE INDEX IF NOT EXISTS idx_votes_session_candidate ON votes(session_id, candidate_id);
 """ % SCORE_UPPER_BOUND
@@ -57,8 +58,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     score_min INTEGER NOT NULL DEFAULT 1,
     score_max INTEGER NOT NULL DEFAULT 4,
     active_candidate_id TEXT,
+    active_character TEXT,
     current_index INTEGER NOT NULL DEFAULT 0,
     candidate_count INTEGER NOT NULL DEFAULT 0,
+    character_count INTEGER NOT NULL DEFAULT 0,
     output_path TEXT,
     created_at TEXT,
     started_at TEXT,
@@ -117,9 +120,14 @@ class SQLiteStore:
                 ("score_min", "ALTER TABLE sessions ADD COLUMN score_min INTEGER NOT NULL DEFAULT 1"),
                 ("score_max", "ALTER TABLE sessions ADD COLUMN score_max INTEGER NOT NULL DEFAULT 4"),
                 ("active_candidate_id", "ALTER TABLE sessions ADD COLUMN active_candidate_id TEXT"),
+                ("active_character", "ALTER TABLE sessions ADD COLUMN active_character TEXT"),
+                ("character_count", "ALTER TABLE sessions ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0"),
             ),
             "candidates": (
                 ("character_name", "ALTER TABLE candidates ADD COLUMN character_name TEXT"),
+            ),
+            "votes": (
+                ("character_name", "ALTER TABLE votes ADD COLUMN character_name TEXT"),
             ),
         }
         for table, columns in additions.items():
@@ -127,7 +135,35 @@ class SQLiteStore:
             for name, statement in columns:
                 if name not in existing:
                     connection.execute(statement)
+        self._migrate_votes_character_target()
         self._migrate_votes_score_bound()
+
+    def _migrate_votes_character_target(self) -> None:
+        """Backfill character targets and collapse historical image votes to one latest vote per character."""
+        connection = self._require_connection()
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(votes)")}
+        if "character_name" not in columns:
+            return
+        connection.execute(
+            """UPDATE votes SET character_name = COALESCE(
+                   (SELECT COALESCE(c.character_name, c.display_title) FROM candidates c WHERE c.id = votes.candidate_id),
+                   candidate_id)
+               WHERE character_name IS NULL OR character_name = ''"""
+        )
+        connection.execute(
+            """DELETE FROM votes
+               WHERE id NOT IN (
+                   SELECT MAX(id) FROM votes GROUP BY session_id, character_name, voter_id
+               )"""
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_votes_session_character_voter "
+            "ON votes(session_id, character_name, voter_id)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_votes_session_character ON votes(session_id, character_name)"
+        )
+        connection.commit()
 
     def _migrate_votes_score_bound(self) -> None:
         """老库的 votes 表带 score BETWEEN 0 AND 9 的 CHECK，10 分票会被数据库直接拒绝。
@@ -150,11 +186,13 @@ class SQLiteStore:
         connection.execute("ALTER TABLE votes RENAME TO votes_legacy")
         connection.executescript(VOTES_TABLE_SCHEMA)
         connection.execute(
-            "INSERT INTO votes (id, session_id, candidate_id, voter_id, voter_name, score, source_type, message_id, created_at, updated_at)"
-            " SELECT id, session_id, candidate_id, voter_id, voter_name, score, source_type, message_id, created_at, updated_at"
+            "INSERT INTO votes (id, session_id, candidate_id, character_name, voter_id, voter_name, score, source_type, message_id, created_at, updated_at)"
+            " SELECT id, session_id, candidate_id, character_name, voter_id, voter_name, score, source_type, message_id, created_at, updated_at"
             " FROM votes_legacy"
         )
         connection.execute("DROP TABLE votes_legacy")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_votes_session_candidate ON votes(session_id, candidate_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_votes_session_character ON votes(session_id, character_name)")
         connection.commit()
 
     async def close(self) -> None:
@@ -173,9 +211,9 @@ class SQLiteStore:
             """INSERT INTO sessions (
                 id, short_id, group_id, umo, project_name, project_path, status,
                 interval_seconds, final_grace_seconds, score_min, score_max,
-                active_candidate_id, current_index, candidate_count,
+                active_candidate_id, active_character, current_index, candidate_count, character_count,
                 output_path, created_at, started_at, finished_at, ai_summary, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 project_name=excluded.project_name,
@@ -184,8 +222,10 @@ class SQLiteStore:
                 score_min=excluded.score_min,
                 score_max=excluded.score_max,
                 active_candidate_id=excluded.active_candidate_id,
+                active_character=excluded.active_character,
                 current_index=excluded.current_index,
                 candidate_count=excluded.candidate_count,
+                character_count=excluded.character_count,
                 output_path=excluded.output_path,
                 started_at=excluded.started_at,
                 finished_at=excluded.finished_at,
@@ -204,8 +244,10 @@ class SQLiteStore:
                 session.score_min,
                 session.score_max,
                 session.active_candidate_id,
+                session.active_character,
                 session.current_index,
                 session.candidate_count,
+                session.character_count,
                 session.output_path,
                 session.created_at,
                 session.started_at,
@@ -251,24 +293,32 @@ class SQLiteStore:
         connection.commit()
 
     async def upsert_vote(self, vote: Vote, policy: str = "last_wins") -> Optional[int]:
-        """写入投票；同一人同一图已有票时返回被覆盖的分数，否则返回 None。"""
+        """写入投票；同一人同一人物已有票时返回被覆盖的分数，否则返回 None。"""
         async with self._lock:
             return await asyncio.to_thread(self._upsert_vote_sync, vote, policy)
 
     def _upsert_vote_sync(self, vote: Vote, policy: str = "last_wins") -> Optional[int]:
         connection = self._require_connection()
+        character = vote.character
+        if not character:
+            row = connection.execute(
+                "SELECT COALESCE(character_name, display_title) AS name FROM candidates WHERE id = ?",
+                (vote.candidate_id,),
+            ).fetchone()
+            character = str(row["name"]) if row is not None else vote.candidate_id
         previous_row = connection.execute(
-            "SELECT score FROM votes WHERE session_id = ? AND candidate_id = ? AND voter_id = ?",
-            (vote.session_id, vote.candidate_id, vote.voter_id),
+            "SELECT score FROM votes WHERE session_id = ? AND character_name = ? AND voter_id = ?",
+            (vote.session_id, character, vote.voter_id),
         ).fetchone()
         previous = int(previous_row["score"]) if previous_row is not None else None
         score_expression, wins_expression = VOTE_POLICIES.get(policy, VOTE_POLICIES["last_wins"])
         connection.execute(
             """INSERT INTO votes (
-                session_id, candidate_id, voter_id, voter_name, score, source_type,
+                session_id, candidate_id, character_name, voter_id, voter_name, score, source_type,
                 message_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(session_id, candidate_id, voter_id) DO UPDATE SET
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id, character_name, voter_id) DO UPDATE SET
+                candidate_id=excluded.candidate_id,
                 voter_name=excluded.voter_name,
                 score=%s,
                 source_type=CASE WHEN %s THEN excluded.source_type ELSE votes.source_type END,
@@ -278,6 +328,7 @@ class SQLiteStore:
             (
                 vote.session_id,
                 vote.candidate_id,
+                character,
                 vote.voter_id,
                 vote.voter_name,
                 vote.score,
@@ -322,6 +373,7 @@ class SQLiteStore:
                 message_id=row["message_id"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
+                character=row["character_name"],
             )
             for row in rows
         ]
@@ -418,8 +470,10 @@ class SQLiteStore:
             score_min=row["score_min"],
             score_max=row["score_max"],
             active_candidate_id=row["active_candidate_id"],
+            active_character=row["active_character"],
             current_index=row["current_index"],
             candidate_count=row["candidate_count"],
+            character_count=row["character_count"],
             output_path=row["output_path"],
             created_at=row["created_at"],
             started_at=row["started_at"],

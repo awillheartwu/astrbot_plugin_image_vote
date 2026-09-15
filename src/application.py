@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional, Sequence
 
 from .config import VoteConfig
+from .character_service import character_of
 from .ai_summary_service import AiSummaryService, build_summary_statistics
 from .logging_utils import get_logger
 from .models import Candidate, SendStatus, Session, SessionStatus, Vote, VoteDecision
@@ -90,6 +91,7 @@ class VoteApplication:
         if not output_root.is_dir() or not os.access(str(output_root), os.W_OK):
             raise PermissionError("output directory is not writable")
         session_id = uuid.uuid4().hex
+        interval_seconds = int(options.get("interval_seconds") or self.config.default_interval_seconds)
         session = Session(
             id=session_id,
             short_id=secrets.token_hex(4).upper(),
@@ -98,11 +100,12 @@ class VoteApplication:
             project_name=project_name.strip() or snapshot.project_name,
             project_path=snapshot.project_path,
             status=SessionStatus.PREPARING,
-            interval_seconds=int(options.get("interval_seconds") or self.config.default_interval_seconds),
-            final_grace_seconds=self.config.effective_final_grace_seconds,
+            interval_seconds=interval_seconds,
+            final_grace_seconds=max(self.config.effective_final_grace_seconds, interval_seconds),
             score_min=self.config.score_min,
             score_max=self.config.score_max,
             candidate_count=len(snapshot.candidates),
+            character_count=len({character_of(item) for item in snapshot.candidates}),
             created_at=utc_now(),
         )
         candidates = tuple(
@@ -180,6 +183,13 @@ class VoteApplication:
                     logger.info("session %s 收到 finish，停止后续图片发送", session.short_id)
                     break
                 candidate = candidates[index]
+                candidate_character = character_of(candidate)
+                previous_character = character_of(candidates[index - 1]) if index > 0 else None
+                if candidate_character != previous_character:
+                    # 上个人物的窗口已结束；下一人物首张成功前不接收普通数字票。
+                    session.active_candidate_id = None
+                    session.active_character = None
+                    await self.store.save_session(session)
                 source_path = PathGuard(Path(session.project_path)).ensure_within(
                     Path(session.project_path) / candidate.source_relative_path, allow_root=False
                 )
@@ -189,6 +199,7 @@ class VoteApplication:
                     candidate.send_status = SendStatus.SENT
                     candidate.sent_at = utc_now()
                     session.active_candidate_id = candidate.id
+                    session.active_character = candidate_character
                     consecutive_failures = 0
                     logger.debug(
                         "session %s 已发送第 %d/%d 张：%s",
@@ -202,7 +213,7 @@ class VoteApplication:
                     session.error_message = str(exc)
                     consecutive_failures += 1
                     logger.warning(
-                        "session %s 第 %d 张发送失败（连续第 %d 张），窗口投票仍记在上一张成功发送的图片上：%s",
+                        "session %s 第 %d 张发送失败（连续第 %d 张）；本人物已有成功图片时仍继续接收人物票：%s",
                         session.short_id,
                         candidate.display_index,
                         consecutive_failures,
@@ -213,10 +224,13 @@ class VoteApplication:
                     "session %s 第 %d 张发送耗时 %.1f 秒", session.short_id, candidate.display_index, elapsed
                 )
                 is_last = index == len(candidates) - 1
-                if not is_last and elapsed > session.interval_seconds:
+                next_is_same_character = (
+                    not is_last and character_of(candidates[index + 1]) == candidate_character
+                )
+                if session.interval_seconds > 0 and not next_is_same_character and not is_last and elapsed > session.interval_seconds:
                     logger.warning(
                         "session %s 第 %d 张发送耗时 %.1f 秒，超过设定间隔 %d 秒；默认语义下实际出图间隔为两者之和，"
-                        "需要严格周期可开启 interval_includes_send_time",
+                        "人物内部仍连续发送；本人物全部图片发完后会等待完整间隔",
                         session.short_id,
                         candidate.display_index,
                         elapsed,
@@ -234,7 +248,9 @@ class VoteApplication:
                     return
                 if control.finish_requested:
                     break
-                await control.wait_for_interval(self._next_wait_seconds(session, is_last, elapsed))
+                # 同一人物的图片连续发送；最后一张成功发送后才开始完整人物投票间隔。
+                if not next_is_same_character:
+                    await control.wait_for_interval(self._next_wait_seconds(session, is_last, elapsed))
 
             session.status = SessionStatus.FINALIZING
             session.finished_at = utc_now()
@@ -592,11 +608,9 @@ class VoteApplication:
         )
 
     def _next_wait_seconds(self, session: Session, is_last: bool, elapsed: float) -> int:
-        """下一张之前的等待时间。周期模式下把本张的发送耗时从间隔里扣掉。"""
+        """A character window always starts after its final image finishes sending."""
         if is_last:
             return session.final_grace_seconds
-        if self.config.interval_includes_send_time:
-            return max(0, int(round(session.interval_seconds - elapsed)))
         return session.interval_seconds
 
     async def _heal_project_name(self, session: Session) -> None:
@@ -689,13 +703,15 @@ class VoteApplication:
                 message_id=message_id,
                 created_at=now,
                 updated_at=now,
+                character=decision.character,
             ),
             policy=self.config.same_user_vote_policy,
         )
         candidate = next((item for item in candidates if item.id == decision.candidate_id), None)
         logger.info(
-            "记录投票 session=%s 第%s张 %s：%s(%s) %s分 来源=%s%s",
+            "记录投票 session=%s 人物=%s（来源图片第%s张 %s）：%s(%s) %s分 来源=%s%s",
             session.short_id,
+            decision.character,
             candidate.display_index if candidate is not None else "?",
             candidate.display_title if candidate is not None else decision.candidate_id,
             voter_name,

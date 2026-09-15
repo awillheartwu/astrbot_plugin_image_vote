@@ -9,6 +9,26 @@ from src.persistence import SQLiteStore
 
 
 class PersistenceTest(unittest.TestCase):
+    def test_votes_are_unique_per_character_even_when_source_images_differ(self):
+        async def scenario(database_path):
+            store = SQLiteStore(database_path)
+            await store.initialize()
+            await store.save_session(Session("s1", "A7F3", "g1", "umo", "p", "/tmp/p", SessionStatus.RUNNING))
+            candidates = [
+                Candidate("c1", "s1", 1, "a.png", "a.png", "A-1", None, 1, character="A"),
+                Candidate("c2", "s1", 2, "b.png", "b.png", "A-2", None, 1, character="A"),
+            ]
+            await store.save_candidates(candidates)
+            await store.upsert_vote(Vote(None, "s1", "c1", "u1", "n", 3, VoteSource.CURRENT_WINDOW, character="A"))
+            await store.upsert_vote(Vote(None, "s1", "c2", "u1", "n", 7, VoteSource.QUOTED_REPLY, character="A"))
+            votes = await store.list_votes("s1")
+            self.assertEqual(len(votes), 1)
+            self.assertEqual((votes[0].character, votes[0].candidate_id, votes[0].score), ("A", "c2", 7))
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory) / "vote.db"))
+
     def test_vote_upsert_keeps_one_vote_per_user_and_candidate(self):
         async def scenario(database_path):
             store = SQLiteStore(database_path)
@@ -198,6 +218,12 @@ class PersistenceTest(unittest.TestCase):
             previous = await store.upsert_vote(Vote(None, "s1", "c1", "u2", "Bob", 10, VoteSource.CURRENT_WINDOW))
             self.assertIsNone(previous)
             self.assertEqual(sorted(item.score for item in await store.list_votes("s1")), [9, 10])
+            index_names = {
+                row[1]
+                for row in store._require_connection().execute("PRAGMA index_list(votes)").fetchall()
+            }
+            self.assertIn("idx_votes_session_candidate", index_names)
+            self.assertIn("idx_votes_session_character", index_names)
             await store.close()
 
         with tempfile.TemporaryDirectory() as directory:

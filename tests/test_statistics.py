@@ -12,8 +12,9 @@ class StatisticsTest(unittest.TestCase):
         ]
         votes = [Vote(None, "s1", "c1", "u1", "Alice", 4, VoteSource.CURRENT_WINDOW)]
         result = calculate_statistics(candidates, votes)
-        self.assertEqual(result.candidates[0].rank, 1)
+        self.assertIsNone(result.candidates[0].rank)
         self.assertIsNone(result.candidates[1].rank)
+        self.assertEqual(result.characters[0].rank, 1)
         self.assertEqual(result.unique_voters, 1)
         self.assertEqual(result.overall_average_score, 4.0)
 
@@ -25,7 +26,7 @@ class StatisticsTest(unittest.TestCase):
         ]
         votes = [
             Vote(None, "s1", "c1", "u1", "n", 4, VoteSource.CURRENT_WINDOW),
-            Vote(None, "s1", "c2", "u1", "n", 2, VoteSource.CURRENT_WINDOW),
+            Vote(None, "s1", "c2", "u2", "n", 2, VoteSource.CURRENT_WINDOW),
             Vote(None, "s1", "c3", "u2", "n", 3, VoteSource.CURRENT_WINDOW),
         ]
         result = calculate_statistics(candidates, votes)

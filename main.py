@@ -85,8 +85,8 @@ def _looks_like_plugin_config(raw: Mapping) -> bool:
 @register(
     PLUGIN_NAME,
     "AstrBot Image Vote",
-    "QQ 群图片轮播投票插件的兼容入口与应用装配层",
-    "0.12.0",
+    "QQ 群人物图片投票插件的兼容入口与应用装配层",
+    "0.13.0",
 )
 class ImageVotePlugin(Star):
     """Keep AstrBot events at the edge and delegate business logic to src/."""
@@ -448,15 +448,16 @@ class ImageVotePlugin(Star):
             )
             yield self._plain_result(
                 event,
-                "已开始投票：%s\n图片数量：%d\n发送间隔：%d 秒\n评分范围：%d-%d\n预计耗时：%s"
+                "已开始投票：%s\n人物数量：%d，图片数量：%d\n人物间隔：%d 秒\n评分范围：%d-%d\n预计耗时：%s"
                 % (
                     session.project_name,
+                    session.character_count,
                     session.candidate_count,
                     session.interval_seconds,
                     self.settings.score_min,
                     self.settings.score_max,
                     self._estimated_duration(
-                        session.candidate_count, session.interval_seconds, session.final_grace_seconds
+                        session.character_count, session.interval_seconds, session.final_grace_seconds
                     ),
                 ),
             )
@@ -498,8 +499,8 @@ class ImageVotePlugin(Star):
             respond = getattr(event, "send", None)
             if callable(respond):
                 await respond(
-                    "已记录第 %d 张图片评分：%d"
-                    % (self._candidate_index(candidates, decision.candidate_id), decision.score)
+                    "已记录人物「%s」评分：%d"
+                    % (decision.character, decision.score)
                 )
         return None
 
@@ -590,7 +591,7 @@ class ImageVotePlugin(Star):
 
     @staticmethod
     def _active_candidate(session, candidates):
-        """投票目标 = 最近一次成功发送的图片；发送失败的图片不会成为目标。"""
+        """最近成功发送的图片用于引用来源；普通票实际归属 session.active_character。"""
         active_id = getattr(session, "active_candidate_id", None)
         if active_id:
             for candidate in candidates:
@@ -637,7 +638,7 @@ class ImageVotePlugin(Star):
     def _estimated_duration(count: int, interval_seconds: int, grace_seconds: int) -> str:
         if count <= 0:
             return "无"
-        total = max(0, count - 1) * interval_seconds + max(grace_seconds, interval_seconds)
+        total = max(0, count - 1) * interval_seconds + grace_seconds
         minutes, seconds = divmod(int(total), 60)
         if minutes and seconds:
             return "约 %d 分 %d 秒" % (minutes, seconds)
@@ -649,9 +650,9 @@ class ImageVotePlugin(Star):
         numbered = sum(1 for item in snapshot.candidates if item.sequence_number is not None)
         plain = len(snapshot.candidates) - numbered
         character_names = {item.character or item.display_title for item in snapshot.candidates}
-        character_line = "角色：%d 个" % len(character_names)
+        character_line = "人物：%d 个" % len(character_names)
         if len(character_names) < len(snapshot.candidates):
-            character_line += "（有多张图属于同一角色，报告里会额外给一份合并统计）"
+            character_line += "（同一人物连续发送，全部图片共用一张人物票）"
         lines = [
             "项目：%s" % snapshot.project_name,
             "路径：%s" % self._project_path_label(snapshot.project_path, project_name),
@@ -662,7 +663,7 @@ class ImageVotePlugin(Star):
             "评分范围：%d-%d" % (self.settings.score_min, self.settings.score_max),
             "预计耗时：%s"
             % self._estimated_duration(
-                len(snapshot.candidates),
+                len(character_names),
                 self.settings.default_interval_seconds,
                 self.settings.effective_final_grace_seconds,
             ),
@@ -789,18 +790,18 @@ class ImageVotePlugin(Star):
             return "当前群没有投票记录。"
         candidates = await self.store.list_candidates(session.id)
         votes = await self.store.list_votes(session.id)
-        current = self._active_candidate(session, candidates)
-        current_votes = sum(1 for vote in votes if current is not None and vote.candidate_id == current.id)
+        current_character = session.active_character
+        current_votes = sum(1 for vote in votes if current_character and vote.character == current_character)
         next_candidate = candidates[session.current_index] if session.current_index < len(candidates) else None
         countdown = managed.control.seconds_until_next if managed is not None else None
-        current_label = "尚未发送" if current is None else "#%03d %s" % (current.display_index, current.display_title)
+        current_label = "尚未发送" if current_character is None else current_character
         if countdown is not None:
             next_label = "%d 秒后" % max(0, int(round(countdown)))
         elif next_candidate is not None:
             next_label = "#%03d %s" % (next_candidate.display_index, next_candidate.display_title)
         else:
             next_label = "无"
-        return "项目：%s\n状态：%s\n进度：%d / %d\n当前：%s\n本图已投：%d 人\n总投票：%d\n下一张：%s\nSession：%s" % (
+        return "项目：%s\n状态：%s\n图片进度：%d / %d\n当前人物：%s\n本人物已投：%d 人\n总投票：%d\n下一张：%s\nSession：%s" % (
             session.project_name,
             session.status.value,
             session.current_index,

@@ -80,6 +80,21 @@ class ProjectScannerTest(unittest.TestCase):
             self.assertEqual(by_name["Cass-废土风格.png"], "Cassandra")
             self.assertEqual(by_name["Aurora-老年版本.png"], "Cassandra")
             self.assertEqual(by_name["Aurora-现代版本.png"], "Aurora")
+
+    def test_same_character_images_are_contiguous_by_first_appearance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in (
+                "screenshot0001 - A - aaaaaa.png",
+                "screenshot0002 - B - bbbbbb.png",
+                "screenshot0003 - A - cccccc.png",
+            ):
+                (root / name).write_bytes(b"image")
+            snapshot = scan_project(root)
+            self.assertEqual([item.character for item in snapshot.candidates], ["A", "A", "B"])
+            self.assertEqual([item.sequence_number for item in snapshot.candidates], [1, 3, 2])
+            self.assertEqual([item.display_index for item in snapshot.candidates], [1, 2, 3])
+
     def test_pipeline_markers_are_stripped_from_display_title(self):
         cases = {
             "screenshot0020 - Vess - 30279726 - reset-1.png": ("Vess", 20),

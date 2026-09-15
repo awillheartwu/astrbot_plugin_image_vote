@@ -10,14 +10,16 @@ from .models import Candidate, Session
 def build_vote_message(session: Session, candidate: Candidate) -> str:
     return (
         "[投票 %03d/%03d · %s]\n"
-        "%s · %s\n"
-        "回复 %d-%d 评分（如 8 或 8分）；也可引用之前的投票图重新评分"
+        "%s · %s · %s\n"
+        "本组图片均属于「%s」；回复 %d-%d 评分给该人物，也可引用本场任意图片改评对应人物"
         % (
             candidate.display_index,
             session.candidate_count,
             session.short_id,
             session.project_name,
+            candidate.character or candidate.display_title,
             candidate.display_title,
+            candidate.character or candidate.display_title,
             session.score_min,
             session.score_max,
         )

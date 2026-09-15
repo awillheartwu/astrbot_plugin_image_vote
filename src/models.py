@@ -56,8 +56,10 @@ class Session:
     score_min: int = 1
     score_max: int = 4
     active_candidate_id: Optional[str] = None
+    active_character: Optional[str] = None
     current_index: int = 0
     candidate_count: int = 0
+    character_count: int = 0
     output_path: Optional[str] = None
     created_at: Optional[str] = None
     started_at: Optional[str] = None
@@ -78,6 +80,7 @@ class Vote:
     message_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    character: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,7 @@ class ProjectSnapshot:
 @dataclass(frozen=True)
 class VoteDecision:
     candidate_id: str
+    character: str
     score: int
     source_type: VoteSource
 
@@ -128,3 +132,5 @@ class SessionStatistics:
     overall_average_score: Optional[float]
     candidates: Tuple[CandidateStatistics, ...]
     characters: Tuple[CharacterStatistics, ...] = ()
+    total_characters: int = 0
+    average_votes_per_character: float = 0.0

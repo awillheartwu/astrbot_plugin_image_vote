@@ -1278,6 +1278,47 @@ dialog.lightbox img {
 .report-grid h3 {
   margin: 12px 0 5px;
 }
+.character-ranking {
+  margin-bottom: 32px;
+  align-items: start;
+}
+.character-card {
+  min-width: 0;
+}
+.character-card .section-title {
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.character-card h2 {
+  overflow-wrap: anywhere;
+}
+.character-card .character-cover {
+  padding: 0;
+  overflow: hidden;
+}
+.character-cover img {
+  display: block;
+}
+.character-card .facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0 0;
+}
+.character-card .facts span {
+  padding: 0;
+  border: 0;
+}
+.character-card .facts b {
+  display: block;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 950px) {
+  .character-ranking {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .character-group + .character-group {
   margin-top: 24px;
 }
@@ -1430,6 +1471,10 @@ dialog.lightbox img {
   }
   .report-grid img {
     height: 140px;
+  }
+  .character-ranking {
+    grid-template-columns: minmax(0, 1fr);
+    margin-bottom: 24px;
   }
   .character-group .section-title {
     align-items: flex-start;

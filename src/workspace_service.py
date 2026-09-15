@@ -12,6 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .ai_summary_service import build_statistics_prompt, build_summary_statistics
+from .character_service import character_of
 from .config import VoteConfig
 from .logging_utils import get_logger
 from .models import SessionStatus
@@ -148,18 +149,21 @@ class WorkspaceService:
         settings = self.plugin.project_service.resolve_options(name)
         snapshot = await asyncio.to_thread(self.plugin.project_service.inspect, name, settings.get('recursive', self.plugin.settings.recursive_scan))
         interval = settings.get('interval_seconds', self.plugin.settings.default_interval_seconds)
+        character_count = len({character_of(candidate) for candidate in snapshot.candidates})
         root = Path(self.plugin.settings.output_root).expanduser()
         parent = root
         while not parent.exists() and parent != parent.parent:
             parent = parent.parent
-        return {'name': snapshot.project_name, 'count': len(snapshot.candidates), 'total_size': snapshot.total_size,
+        return {'name': snapshot.project_name, 'count': len(snapshot.candidates), 'character_count': character_count, 'total_size': snapshot.total_size,
                 'sort_mode': snapshot.sort_mode, 'warnings': list(snapshot.warnings),
                 'invalid_files': list(snapshot.invalid_files),
                 'first': [asdict(c) for c in snapshot.candidates[:6]],
                 'last': [c.source_filename for c in snapshot.candidates[-5:]],
                 'interval_seconds': interval, 'interval_source': 'project' if 'interval_seconds' in settings else 'default',
                 'score_min': self.plugin.settings.score_min, 'score_max': self.plugin.settings.score_max,
-                'estimated_seconds': max(0, len(snapshot.candidates) - 1) * interval + max(interval, self.plugin.settings.effective_final_grace_seconds),
+                'estimated_seconds': max(0, character_count - 1) * interval + max(
+                    interval, self.plugin.settings.effective_final_grace_seconds
+                ),
                 'output_writable': parent.is_dir() and os.access(parent, os.W_OK)}
 
     def browse(self, root=None, relative=''):
@@ -253,6 +257,7 @@ class WorkspaceService:
                                    else 'failed' if error else 'ready' if available else 'missing')
             row['report_error'] = error
             row['active_candidate'] = next(({'id': c.id, 'name': c.display_title, 'index': c.display_index} for c in candidates if c.id == session.active_candidate_id), None)
+            row['active_character'] = session.active_character
             output.append(row)
         return {'total': result['total'], 'sessions': output}
 

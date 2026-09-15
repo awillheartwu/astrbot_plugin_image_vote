@@ -2,7 +2,7 @@ import asyncio
 import unittest
 
 from src.ai_summary_service import AiSummaryService, build_statistics_prompt, build_summary_statistics
-from src.models import CandidateStatistics, SessionStatistics
+from src.models import CandidateStatistics, CharacterStatistics, SessionStatistics
 
 
 class AiSummaryTest(unittest.TestCase):
@@ -17,6 +17,11 @@ class AiSummaryTest(unittest.TestCase):
                 CandidateStatistics("c1", 1, "Top", 2, 4.0, {1: 0, 2: 0, 3: 0, 4: 2}, 1),
                 CandidateStatistics("c2", 2, "Bottom", 1, 1.0, {1: 1, 2: 0, 3: 0, 4: 0}, 2),
             ),
+            characters=(
+                CharacterStatistics("Top", 1, 2, 4.0, {1: 0, 2: 0, 3: 0, 4: 2}, 1),
+                CharacterStatistics("Bottom", 1, 1, 1.0, {1: 1, 2: 0, 3: 0, 4: 0}, 2),
+            ),
+            total_characters=2,
         )
         payload = build_summary_statistics("demo", statistics)
         self.assertEqual(payload["project"], "demo")
@@ -42,6 +47,11 @@ class AiSummaryTest(unittest.TestCase):
                 CandidateStatistics("c1", 1, "Split", 3, 3.0, {1: 1, 2: 1, 3: 0, 4: 1}, 1),
                 CandidateStatistics("c2", 2, "Agreed", 3, 3.0, {1: 0, 2: 0, 3: 3, 4: 0}, 2),
             ),
+            characters=(
+                CharacterStatistics("Split", 1, 3, 3.0, {1: 1, 2: 1, 3: 0, 4: 1}, 1),
+                CharacterStatistics("Agreed", 1, 3, 3.0, {1: 0, 2: 0, 3: 3, 4: 0}, 2),
+            ),
+            total_characters=2,
         )
         payload = build_summary_statistics("demo", statistics)
         self.assertEqual(payload["high_disagreement"][0]["name"], "Split")

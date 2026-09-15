@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Protocol
 
+from .character_service import character_of
 from .logging_utils import get_logger
 from .models import Candidate, Session, SessionStatistics, Vote
 from .report_data import enrich_report
@@ -94,6 +95,7 @@ class DirectoryReportGenerator:
                     "candidate_id": candidate.id,
                     "display_index": candidate.display_index,
                     "display_title": candidate.display_title,
+                    "character": character_of(candidate),
                     "source_filename": candidate.source_filename,
                     "main_image": "images/%s" % main_path.name,
                     "thumbnail": "images/%s" % thumb_path.name,
@@ -112,6 +114,7 @@ class DirectoryReportGenerator:
                 "group_id": session.group_id,
                 "project_name": session.project_name,
                 "candidate_count": session.candidate_count,
+                "character_count": session.character_count,
                 "status": session.status.value,
                 "score_min": session.score_min,
                 "score_max": session.score_max,
@@ -124,10 +127,16 @@ class DirectoryReportGenerator:
                 "unique_voters": statistics.unique_voters,
                 "average_votes_per_candidate": statistics.average_votes_per_candidate,
                 "overall_average_score": statistics.overall_average_score,
+                "total_characters": statistics.total_characters,
+                "average_votes_per_character": statistics.average_votes_per_character,
             },
             "characters": [
                 {
                     "character": item.character,
+                    "candidate_ids": [
+                        candidate.id for candidate in candidate_list
+                        if character_of(candidate) == item.character
+                    ],
                     "candidate_count": item.candidate_count,
                     "vote_count": item.vote_count,
                     "average_score": item.average_score,
@@ -296,7 +305,7 @@ class DirectoryReportGenerator:
         rows = payload["candidates"]
         characters = payload.get("characters") or []
         character_section = ""
-        if characters and len(characters) < len(rows):
+        if characters:
             character_rows = []
             for item in characters:
                 rank = "—" if item["rank"] is None else str(item["rank"])
@@ -312,42 +321,31 @@ class DirectoryReportGenerator:
                     )
                 )
             character_section = (
-                '<section class="characters"><h2>角色汇总（同一角色的多张图合并统计）</h2>'
-                "<table><thead><tr><th>排名</th><th>角色</th><th>图片数</th><th>票数</th><th>平均分</th></tr></thead>"
+                '<section class="characters"><h2>人物排名（同一人物的图片合并展示）</h2>'
+                "<table><thead><tr><th>排名</th><th>人物</th><th>图片数</th><th>票数</th><th>平均分</th></tr></thead>"
                 "<tbody>%s</tbody></table></section>" % "".join(character_rows)
             )
         cards = []
         for row in rows:
-            average = "无投票" if row["average_score"] is None else "%.2f" % row["average_score"]
-            rank = "—" if row["rank"] is None else str(row["rank"])
-            distribution = {int(key): value for key, value in (row["score_distribution"] or {}).items()}
-            distribution_text = " · ".join(
-                "%d分 %d" % (score, distribution.get(score, 0))
-                for score in range(int(session["score_min"]), int(session["score_max"]) + 1)
-            )
             failure = (
                 '<p class="send-failed">这张图发送失败，未计入有效统计</p>'
                 if row.get("send_status") == "send_failed"
                 else ""
             )
             cards.append(
-                """<article class=\"candidate-card\" data-title=\"%s\" data-index=\"%s\" data-rank=\"%s\">
+                """<article class=\"candidate-card\" data-title=\"%s\" data-index=\"%s\">
   <a href=\"%s\"><img loading=\"lazy\" src=\"%s\" alt=\"%s\"></a>
-  <div class=\"candidate-content\"><h2>#%s %s</h2><p class=\"score\">排名 %s · 平均分 %s · %s 人投票</p>
-  <p class=\"distribution\">%s</p>%s<p class=\"filename\">%s</p></div></article>"""
+  <div class=\"candidate-content\"><h2>#%s %s</h2><p class=\"score\">人物：%s</p>
+  %s<p class=\"filename\">%s</p></div></article>"""
                 % (
                     html.escape(str(row["display_title"]), quote=True),
                     row["display_index"],
-                    row["rank"] or 0,
                     html.escape(str(row["main_image"]), quote=True),
                     html.escape(str(row["thumbnail"]), quote=True),
                     html.escape(str(row["display_title"]), quote=True),
                     row["display_index"],
                     html.escape(str(row["display_title"])),
-                    rank,
-                    average,
-                    row["vote_count"],
-                    distribution_text,
+                    html.escape(str(row.get("character") or row["display_title"])),
                     failure,
                     html.escape(str(row["source_filename"])),
                 )
@@ -363,7 +361,7 @@ class DirectoryReportGenerator:
 <div><strong>%s</strong><span>图片</span></div><div><strong>%s</strong><span>有效票</span></div><div><strong>%s</strong><span>参与人数</span></div><div><strong>%s</strong><span>总体平均分</span></div></section>
 <section class=\"ai-summary\"><h2>总结</h2><p>%s</p></section></header>
 %s
-<section class=\"toolbar\"><input id=\"search\" type=\"search\" placeholder=\"搜索图片名称\"><button id=\"sort\" type=\"button\">切换原始顺序</button><span class=\"hint\">默认按排名显示</span></section>
+<section class=\"toolbar\"><span class=\"hint\">图片按人物归类；图片本身不单独计票或排名</span></section>
 <section id=\"candidates\" class=\"candidate-grid\">%s</section></main><script id=\"report-data\" type=\"application/json\">%s</script><script src=\"./report.js\"></script></body></html>""" % (
             html.escape(str(session["project_name"])),
             html.escape(str(session["project_name"])),

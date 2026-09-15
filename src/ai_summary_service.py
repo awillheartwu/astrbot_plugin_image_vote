@@ -48,20 +48,16 @@ def build_summary_statistics(
     score_min: int = 1,
     score_max: int = 4,
 ) -> Dict[str, Any]:
-    ranked = [item for item in statistics.candidates if item.vote_count > 0]
-    top = sorted(ranked, key=lambda item: (item.rank or 0, item.display_index))[:top_n]
+    ranked = [item for item in statistics.characters if item.vote_count > 0]
+    top = sorted(ranked, key=lambda item: (item.rank or 0, item.character))[:top_n]
     bottom = sorted(
         ranked,
-        key=lambda item: (float(item.average_score), -item.vote_count, item.display_index),
+        key=lambda item: (float(item.average_score), -item.vote_count, item.character),
     )[:bottom_n]
     disagreement = sorted(
         (item for item in ranked if item.vote_count >= 2),
-        key=lambda item: (-score_std_dev(item.score_distribution), item.display_index),
+        key=lambda item: (-score_std_dev(item.score_distribution), item.character),
     )[:3]
-    top_characters = sorted(
-        (item for item in statistics.characters if item.vote_count > 0),
-        key=lambda item: (item.rank or 9999, item.character),
-    )[:top_n]
     return {
         "project": project_name,
         "top_n": top_n,
@@ -69,19 +65,20 @@ def build_summary_statistics(
         "score_min": score_min,
         "score_max": score_max,
         "total_candidates": statistics.total_candidates,
+        "total_characters": statistics.total_characters,
         "total_valid_votes": statistics.total_valid_votes,
         "unique_voters": statistics.unique_voters,
         "top": [
-            {"name": item.display_title, "avg": item.average_score, "votes": item.vote_count}
+            {"name": item.character, "avg": item.average_score, "votes": item.vote_count, "images": item.candidate_count}
             for item in top
         ],
         "bottom": [
-            {"name": item.display_title, "avg": item.average_score, "votes": item.vote_count}
+            {"name": item.character, "avg": item.average_score, "votes": item.vote_count, "images": item.candidate_count}
             for item in bottom
         ],
         "high_disagreement": [
             {
-                "name": item.display_title,
+                "name": item.character,
                 "std": round(score_std_dev(item.score_distribution), 2),
                 "avg": item.average_score,
                 "votes": item.vote_count,
@@ -95,7 +92,7 @@ def build_summary_statistics(
                 "votes": item.vote_count,
                 "images": item.candidate_count,
             }
-            for item in top_characters
+            for item in top
         ],
     }
 

@@ -114,7 +114,7 @@ class ReportGeneratorTest(unittest.TestCase):
             source_root.mkdir()
             source = source_root / "one.png"
             source.write_bytes(b"original")
-            candidate = Candidate("c1", "s1", 1, source.name, source.name, "One", None, source.stat().st_size)
+            candidate = Candidate("c1", "s1", 1, source.name, source.name, "One", None, source.stat().st_size, character="One")
             distribution = {score: 0 for score in range(1, 11)}
             distribution[10] = 2
             statistics = SessionStatistics(
@@ -124,6 +124,7 @@ class ReportGeneratorTest(unittest.TestCase):
                 average_votes_per_candidate=2.0,
                 overall_average_score=10.0,
                 candidates=(CandidateStatistics("c1", 1, "One", 2, 10.0, distribution, 1),),
+                characters=(CharacterStatistics("One", 1, 2, 10.0, distribution, 1),),
             )
             session = Session(
                 "s1", "A7F3", "g1", "umo", "project", str(source_root), SessionStatus.COMPLETED,
@@ -134,13 +135,13 @@ class ReportGeneratorTest(unittest.TestCase):
             )
             page = (report / "index.html").read_text(encoding="utf-8")
             self.assertIn("评分范围 1-10", page)
-            self.assertIn("10分 2", page)
-            self.assertIn("5分 0", page)
+            self.assertIn('"10": 2', page)
+            self.assertIn('"5": 0', page)
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
-    def test_character_summary_appears_only_when_images_share_a_character(self):
+    def test_character_ranking_groups_images_under_the_same_person(self):
         async def scenario(root, merged):
             source_root = root / "input"
             output_root = root / "output"
@@ -149,11 +150,14 @@ class ReportGeneratorTest(unittest.TestCase):
                 (source_root / name).write_bytes(b"original")
             first_title, second_title = ("Aurora-现代版本", "Aurora-老年版本") if merged else ("Aurora", "Cass")
             candidates = [
-                Candidate("c1", "s1", 1, "a.png", "a.png", first_title, None, 1),
-                Candidate("c2", "s1", 2, "b.png", "b.png", second_title, None, 1),
+                Candidate("c1", "s1", 1, "a.png", "a.png", first_title, None, 1, character="Aurora" if merged else "Aurora"),
+                Candidate("c2", "s1", 2, "b.png", "b.png", second_title, None, 1, character="Aurora" if merged else "Cass"),
             ]
             characters = (
-                (CharacterStatistics("Aurora", 2, 1, 4.0, {1: 0, 2: 0, 3: 0, 4: 1}, 1),) if merged else ()
+                (CharacterStatistics("Aurora", 2, 1, 4.0, {1: 0, 2: 0, 3: 0, 4: 1}, 1),) if merged else (
+                    CharacterStatistics("Aurora", 1, 1, 4.0, {1: 0, 2: 0, 3: 0, 4: 1}, 1),
+                    CharacterStatistics("Cass", 1, 0, None, {1: 0, 2: 0, 3: 0, 4: 0}, None),
+                )
             )
             statistics = SessionStatistics(
                 total_candidates=2,
@@ -178,11 +182,12 @@ class ReportGeneratorTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             page = asyncio.run(scenario(Path(directory), True))
-            self.assertIn("角色汇总", page)
+            self.assertIn("人物排名", page)
             self.assertIn("Aurora", page)
         with tempfile.TemporaryDirectory() as directory:
             page = asyncio.run(scenario(Path(directory), False))
-            self.assertNotIn("角色汇总", page)
+            self.assertIn("人物排名", page)
+            self.assertIn("Cass", page)
 
     def test_single_html_embeds_derivatives_and_falls_back_when_too_large(self):
         async def scenario(root):

@@ -27,6 +27,9 @@
 * {
   box-sizing: border-box;
 }
+#report-app:not(:empty) + #report-fallback {
+  display: none;
+}
 body {
   margin: 0;
   background: var(--bg);
@@ -1275,6 +1278,9 @@ dialog.lightbox img {
 .report-grid h3 {
   margin: 12px 0 5px;
 }
+.character-group + .character-group {
+  margin-top: 24px;
+}
 .placeholder {
   display: inline-flex;
   width: 30px;
@@ -1424,6 +1430,11 @@ dialog.lightbox img {
   }
   .report-grid img {
     height: 140px;
+  }
+  .character-group .section-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
   .report-header {
     margin-bottom: 24px;

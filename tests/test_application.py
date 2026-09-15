@@ -6,7 +6,9 @@ from pathlib import Path
 
 from src.application import VoteApplication
 from src.config import VoteConfig
-from src.models import Session, SessionStatus
+from src.models import Session, SessionStatus, Vote, VoteSource
+from src.path_guard import PathGuard
+from src.report_generator import PLUGIN_NAME, REPORT_MARKER
 from src.persistence import SQLiteStore
 from src.project_service import ProjectService
 from src.project_registry import ProjectRegistry
@@ -52,6 +54,42 @@ class ApplicationTest(unittest.TestCase):
             self.assertEqual(sent, [(1, "screenshot0001 - A - a.png"), (2, "screenshot0002 - B - b.png")])
             self.assertEqual(persisted.status, SessionStatus.COMPLETED)
             self.assertEqual(persisted.current_index, 2)
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_purge_session_removes_votes_candidates_and_report(self):
+        async def scenario(root):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            (project_root / "one.png").write_bytes(b"x")
+            config = VoteConfig.from_mapping({"input_root": str(input_root), "output_root": str(root / "reports")})
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            application = VoteApplication(config, ProjectService(input_root), store, SessionManager(), VoteRouter())
+            session = await application.prepare_session("g1", "umo", "demo")
+            candidates = await store.list_candidates(session.id)
+            await store.upsert_vote(
+                Vote(None, session.id, candidates[0].id, "u1", "Alice", 8, VoteSource.CURRENT_WINDOW)
+            )
+            report_dir = root / "reports" / "demo" / (session.short_id + "-purge")
+            PathGuard.write_report_marker(report_dir, REPORT_MARKER, PLUGIN_NAME, session.id, {"short_id": session.short_id})
+            (report_dir / "index.html").write_text("<html>x</html>", encoding="utf-8")
+            session.output_path = str(report_dir)
+            await store.save_session(session)
+
+            with self.assertRaises(ValueError):
+                await application.purge_session(session.id)
+            result = await application.purge_session(session.id, confirm=True)
+            self.assertEqual((result.votes, result.candidates, result.reports), (1, 1, 1))
+            self.assertIsNone(await store.get_session(session.id))
+            self.assertEqual(await store.list_votes(session.id), [])
+            self.assertEqual(await store.list_candidates(session.id), [])
+            self.assertFalse(report_dir.exists())
+            with self.assertRaises(FileNotFoundError):
+                await application.purge_session(session.id, confirm=True)
             await store.close()
 
         with tempfile.TemporaryDirectory() as directory:

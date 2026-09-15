@@ -4,6 +4,7 @@ import asyncio
 import os
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Optional, Sequence
@@ -25,6 +26,17 @@ from .vote_collector import VoteRouter
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class PurgeResult:
+    """彻底删除的结果：报告目录数、票数、候选数。"""
+
+    session_id: str
+    short_id: str
+    reports: int = 0
+    votes: int = 0
+    candidates: int = 0
 
 
 logger = get_logger()
@@ -532,6 +544,38 @@ class VoteApplication:
         logger.info("自动清理：删除 %d 个超过 %d 天的报告目录，跳过 %d 个使用中的报告",
                     result.removed, self.config.report_retention_days, result.skipped)
         return result
+
+    async def purge_session(self, session_id: str, confirm: bool = False) -> PurgeResult:
+        """彻底删除一场投票：报告目录 + 数据库里的票与候选，不可恢复。原图不受影响。"""
+        if not confirm:
+            raise ValueError('彻底删除需要确认')
+        session = await self.store.get_session(session_id)
+        if session is None:
+            raise FileNotFoundError('场次不存在，可能已被删除')
+        managed = await self.sessions.active_for_group(session.group_id)
+        if managed is not None and managed.session.id == session.id:
+            raise ValueError('该场次仍在运行或收尾，先结束再彻底删除')
+        reports = 0
+        if session.output_path:
+            cleanup = ReportCleanupService(Path(self.config.output_root)).cleanup(
+                session.id, activity=self.report_activity
+            )
+            reports = cleanup.removed
+        deleted = await self.store.purge_session(session.id)
+        logger.warning(
+            "彻底删除场次 %s：报告 %d 个，票 %d 条，候选 %d 条",
+            session.short_id,
+            reports,
+            deleted.get('votes', 0),
+            deleted.get('candidates', 0),
+        )
+        return PurgeResult(
+            session_id=session.id,
+            short_id=session.short_id,
+            reports=reports,
+            votes=deleted.get('votes', 0),
+            candidates=deleted.get('candidates', 0),
+        )
 
     def _warn_range_mismatch(self, session: Session) -> None:
         """运行中改了评分范围时提醒一次：计票以会话快照为准，新范围下个会话生效。"""

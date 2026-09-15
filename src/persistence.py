@@ -4,7 +4,7 @@ import asyncio
 import re
 import sqlite3
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from .logging_utils import get_logger
 from .models import Candidate, SendStatus, Session, SessionStatus, Vote, VoteSource
@@ -293,6 +293,19 @@ class SQLiteStore:
     async def list_votes(self, session_id: str) -> List[Vote]:
         async with self._lock:
             return await asyncio.to_thread(self._list_votes_sync, session_id)
+
+    async def purge_session(self, session_id: str) -> Dict[str, int]:
+        """彻底删除一场投票的数据库记录：票、候选、会话本身。不可恢复。"""
+        async with self._lock:
+            return await asyncio.to_thread(self._purge_session_sync, session_id)
+
+    def _purge_session_sync(self, session_id: str) -> Dict[str, int]:
+        connection = self._require_connection()
+        votes = connection.execute("DELETE FROM votes WHERE session_id = ?", (session_id,)).rowcount
+        candidates = connection.execute("DELETE FROM candidates WHERE session_id = ?", (session_id,)).rowcount
+        sessions = connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,)).rowcount
+        connection.commit()
+        return {"votes": votes, "candidates": candidates, "sessions": sessions}
 
     def _list_votes_sync(self, session_id: str) -> List[Vote]:
         connection = self._require_connection()

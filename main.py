@@ -385,7 +385,7 @@ class ImageVotePlugin(Star):
         if command == "status":
             yield self._plain_result(event, await self._status_text(group_id))
             return
-        if command in {"export", "cleanup"}:
+        if command in {"export", "cleanup", "purge"}:
             if not is_admin_event(event):
                 yield self._plain_result(event, "只有 AstrBot 管理员可以执行此操作。")
                 return
@@ -398,6 +398,26 @@ class ImageVotePlugin(Star):
                 except Exception as exc:
                     yield self._plain_result(event, "导出失败：%s" % exc)
                 return
+            if command == "purge":
+                purge_parts = argument_text.split()
+                if len(purge_parts) != 2 or purge_parts[1].lower() != "confirm":
+                    yield self._plain_result(
+                        event,
+                        "彻底删除会同时清掉这场投票的投票记录（票与候选）和报告文件，不可恢复。\n"
+                        "确认请使用：/vote purge <session_id|短ID> confirm",
+                    )
+                    return
+                try:
+                    result = await self.application.purge_session(purge_parts[0], confirm=True)
+                    yield self._plain_result(
+                        event,
+                        "已彻底删除场次 %s：报告 %d 个、投票 %d 条、候选 %d 条。原图未受影响。"
+                        % (result.short_id, result.reports, result.votes, result.candidates),
+                    )
+                except Exception as exc:
+                    yield self._plain_result(event, "彻底删除失败：%s" % exc)
+                return
+
             cleanup_parts = argument_text.split()
             if not cleanup_parts:
                 yield self._plain_result(event, "用法：/vote cleanup <session_id|项目名|all confirm>")

@@ -42,6 +42,7 @@ class WorkspaceAPI:
                                  ('projects/unregister','POST'),('projects/preview','GET'),('browse','GET'),
                                  ('groups','GET'),('providers','GET'),('sessions','GET'),('sessions/start','POST'),
                                  ('sessions/control','POST'),('reports/export','POST'),('reports/cleanup','POST'),
+                                 ('sessions/purge','POST'),
                                  ('reports/download','GET'),('reports/preview','GET'),('thumbnail','GET'),('prompt/preview','POST')]:
             async def handler(_endpoint=endpoint, _method=method):
                 try:
@@ -122,6 +123,18 @@ class WorkspaceAPI:
             with service.reading(session_id):
                 path = await service.report_directory(session_id)
                 return await (self.download(path) if endpoint.endswith('download') else self.preview_report(path))
+        if endpoint == 'sessions/purge':
+            if body.get('confirmed') is not True:
+                raise ValueError('彻底删除需要确认')
+            async with service.lock:
+                result = await self.plugin.application.purge_session(str(body.get('session_id','')), confirm=True)
+            return {
+                'session_id': result.session_id,
+                'short_id': result.short_id,
+                'reports': result.reports,
+                'votes': result.votes,
+                'candidates': result.candidates,
+            }
         if endpoint == 'thumbnail':
             return await self.thumbnail(query)
         if endpoint == 'prompt/preview':

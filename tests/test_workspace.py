@@ -303,3 +303,14 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
             await self.service.register({'old_name': 'a/b', 'name': '半成品',
                                          'path': str(self.root/'input'/'demo')})
         self.assertEqual(sorted(self.plugin.project_registry.entries()), ['别名', '新名'])
+
+    async def test_purge_requires_confirmation_and_deletes_records(self):
+        output = self.make_report('s1')
+        await self.completed_session('s1', output)
+        api = self.api({'session_id': 's1'})
+        with self.assertRaises(ValueError):
+            await api.dispatch('sessions/purge', 'POST', {'session_id': 's1'})
+        result = await api.dispatch('sessions/purge', 'POST', {'session_id': 's1', 'confirmed': True})
+        self.assertEqual(result['reports'], 1)
+        self.assertIsNone(await self.store.get_session('s1'))
+        self.assertFalse(output.exists())

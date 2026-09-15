@@ -55,6 +55,7 @@
 | `/vote stop` | 管理员 | 取消本次投票，保留已收到的投票 |
 | `/vote export` | 管理员 | 用最近一次完成或取消的会话重新生成报告 |
 | `/vote cleanup <短ID 或 项目名 或 all confirm>` | 管理员 | 只删除本插件生成的报告目录 |
+| `/vote purge <短ID 或 session_id> confirm` | 管理员 | 彻底删除一场投票：报告目录 + 投票记录（票与候选），不可恢复；原图不受影响，页面历史里也有「彻底删除」按钮 |
 | `/vote register <项目名> <容器内绝对路径>` | 管理员 | 把任意目录登记成一个项目 |
 | `/vote unregister <项目名>` | 管理员 | 取消登记 |
 | `/vote projects` | 管理员 | 列出登记项与它们的容器内路径 |

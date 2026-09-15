@@ -13,7 +13,7 @@ from src.vote_collector import VoteRouter
 
 
 class MergedSendingTest(unittest.TestCase):
-    async def _run(self, root, files, config_extra, sender):
+    async def _run(self, root, files, config_extra, sender, interval_seconds=0):
         input_root = root / "projects"
         project_root = input_root / "demo"
         project_root.mkdir(parents=True)
@@ -28,7 +28,7 @@ class MergedSendingTest(unittest.TestCase):
             config, ProjectService(input_root), store, SessionManager(), VoteRouter(), sender=sender
         )
         session = await application.prepare_session("g1", "umo", "demo")
-        session.interval_seconds = 0
+        session.interval_seconds = interval_seconds
         session.final_grace_seconds = 0
         candidates = await store.list_candidates(session.id)
 
@@ -70,6 +70,71 @@ class MergedSendingTest(unittest.TestCase):
             current = await store.get_session(session.id)
             self.assertIn("发送超时", current.error_message or "")
             self.assertEqual(current.status, SessionStatus.COMPLETED)
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_merged_sending_does_not_warn_about_the_character_interval(self):
+        """合并发送一条多张图，整条耗时必然超过人物间隔，不该按整条刷 WARN。"""
+        async def scenario(root):
+            async def sender(session, candidate, image_paths):
+                calls.append(len(image_paths))
+                if len(calls) == 1:
+                    await asyncio.sleep(1.2)
+
+            calls = []
+            files = ["screenshot%04d - Elis - hash%04d.png" % (i, i) for i in (1, 2)]
+            files.append("screenshot0003 - Bob - hash0003.png")
+            with self.assertLogs("astrbot_plugin_image_vote", level="DEBUG") as captured:
+                store, _session = await self._run(
+                    root, files, {"merge_character_images": True, "merge_character_images_max": 3}, sender,
+                    interval_seconds=1,
+                )
+            self.assertEqual(calls[0], 2)
+            warnings = [r.getMessage() for r in captured.records if "超过设定间隔" in r.getMessage()]
+            self.assertEqual(warnings, [])
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_single_image_sending_still_warns_when_it_exceeds_the_interval(self):
+        async def scenario(root):
+            async def sender(session, candidate, image_paths):
+                await asyncio.sleep(1.2)
+
+            files = ["screenshot0001 - Elis - hash0001.png", "screenshot0002 - Bob - hash0002.png"]
+            with self.assertLogs("astrbot_plugin_image_vote", level="DEBUG") as captured:
+                store, _session = await self._run(
+                    root, files, {"merge_character_images": False}, sender, interval_seconds=1
+                )
+            warnings = [r.getMessage() for r in captured.records if "超过设定间隔" in r.getMessage()]
+            self.assertEqual(len(warnings), 1, warnings)
+            self.assertIn("第 1-1 张发送耗时", warnings[0])
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_merged_sending_warns_when_the_per_image_pace_exceeds_the_interval(self):
+        async def scenario(root):
+            async def sender(session, candidate, image_paths):
+                calls.append(len(image_paths))
+                if len(calls) == 1:
+                    await asyncio.sleep(2.2)
+
+            calls = []
+            files = ["screenshot%04d - Elis - hash%04d.png" % (i, i) for i in (1, 2)]
+            files.append("screenshot0003 - Bob - hash0003.png")
+            with self.assertLogs("astrbot_plugin_image_vote", level="DEBUG") as captured:
+                store, _session = await self._run(
+                    root, files, {"merge_character_images": True, "merge_character_images_max": 3}, sender,
+                    interval_seconds=1,
+                )
+            warnings = [r.getMessage() for r in captured.records if "超过设定间隔" in r.getMessage()]
+            self.assertEqual(len(warnings), 1, warnings)
+            self.assertIn("平均每张 1.1 秒", warnings[0])
             await store.close()
 
         with tempfile.TemporaryDirectory() as directory:

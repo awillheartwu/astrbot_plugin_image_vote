@@ -271,16 +271,8 @@ class VoteApplication:
                     and not is_last
                     and character_of(candidates[session.current_index]) == candidate_character
                 )
-                if session.interval_seconds > 0 and not next_is_same_character and not is_last and elapsed > session.interval_seconds:
-                    logger.warning(
-                        "session %s 第 %d-%d 张发送耗时 %.1f 秒，超过设定间隔 %d 秒；"
-                        "人物内部仍连续发送；本人物全部图片发完后会等待完整间隔",
-                        session.short_id,
-                        candidate.display_index,
-                        group[-1].display_index,
-                        elapsed,
-                        session.interval_seconds,
-                    )
+                if session.interval_seconds > 0 and not next_is_same_character and not is_last:
+                    self._log_send_pace(session, candidate, group, elapsed)
                 await self.store.save_candidates(group)
                 await self.store.save_session(session)
                 limit = self.config.send_failure_pause_threshold
@@ -689,6 +681,38 @@ class VoteApplication:
         if is_last:
             return session.final_grace_seconds
         return session.interval_seconds
+
+    @staticmethod
+    def _log_send_pace(session: Session, candidate: Candidate, group: Sequence[Candidate], elapsed: float) -> None:
+        """发送耗时与人物间隔的关系：逐张按单张判定，合并按平均每张判定。
+
+        合并发送一条消息里有多张图，整条耗时必然超过人物间隔，按整条 WARN 只会每个
+        人物刷一条；真正值得提示的是「平均每张都追不上间隔」。
+        """
+        interval = session.interval_seconds
+        span = "%d-%d" % (candidate.display_index, group[-1].display_index)
+        if len(group) > 1:
+            per_image = elapsed / len(group)
+            if per_image > interval:
+                logger.warning(
+                    "session %s 第 %s 张合并发送耗时 %.1f 秒（平均每张 %.1f 秒），超过设定间隔 %d 秒；"
+                    "合并发送按整条消息计时，本人物全部图片发完后会等待完整间隔",
+                    session.short_id,
+                    span,
+                    elapsed,
+                    per_image,
+                    interval,
+                )
+            return
+        if elapsed > interval:
+            logger.warning(
+                "session %s 第 %s 张发送耗时 %.1f 秒，超过设定间隔 %d 秒；"
+                "人物内部仍连续发送；本人物全部图片发完后会等待完整间隔",
+                session.short_id,
+                span,
+                elapsed,
+                interval,
+            )
 
     async def _heal_project_name(self, session: Session) -> None:
         """老会话可能存的是文件夹名；若路径已在登记表里，改用登记名，报告目录随之统一。"""

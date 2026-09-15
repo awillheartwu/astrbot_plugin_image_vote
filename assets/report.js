@@ -20,6 +20,53 @@
   const formatTime = (v) => v && !Number.isNaN(Date.parse(v)) ? new Date(v).toLocaleString("zh-CN", {hour12:false}) : "—";
   const image = (row, main = false) => `<img src="${esc((main ? row.main_image : row.thumbnail) || "")}" alt="${esc(row.display_title)}" loading="lazy">`;
   const avatar = (person) => person.avatar ? `<img class="avatar" src="${esc(person.avatar)}" alt="">` : `<span class="placeholder" aria-hidden="true">${esc((person.name || "?").slice(0,1))}</span>`;
+  // All charts use report data and inline SVG: no network or export dependencies.
+  document.documentElement.dataset.theme ||= "dark";
+  const coverFor = c => imagesFor(c).find(r => r.send_status === "sent") || imagesFor(c)[0];
+  const totalCounts = characters.reduce((counts, c) => {
+    Object.entries(c.score_distribution || {}).forEach(([key, value]) => counts[key] = (counts[key] || 0) + Number(value));
+    return counts;
+  }, {});
+  function metric(value, label, tone = "violet") {
+    return `<div class="metric-card tone-${tone}"><span class="metric-label">${label}</span><b>${value}</b><i aria-hidden="true"></i></div>`;
+  }
+  function histogram(counts, title = "评分分布") {
+    const min = Number(s.score_min), max = Number(s.score_max);
+    const step = Math.max(1, Math.ceil((max-min+1)/11)), bins = [];
+    for (let start=min; start<=max; start+=step) {
+      const end=Math.min(max,start+step-1);
+      let count=0;
+      for(let n=start;n<=end;n++) count+=Number(counts[n] || 0);
+      bins.push({label:start===end?`${start}`:`${start}–${end}`,count});
+    }
+    const peak=Math.max(3,Math.ceil(Math.max(0,...bins.map(b=>b.count))/3)*3);
+    const plot={x:32,y:20,w:292,h:130}, cell=plot.w/bins.length;
+    const grids=Array.from({length:4},(_,i)=>{
+      const y=plot.y+plot.h-i*plot.h/3;
+      return `<line x1="32" y1="${y}" x2="324" y2="${y}" class="chart-grid"/><text x="24" y="${y+4}" text-anchor="end">${peak*i/3}</text>`;
+    }).join("");
+    return `<div class="chart histogram"><svg viewBox="0 0 340 186" role="img" aria-label="${esc(title)}，横轴为分数，纵轴为票数"><title>${esc(title)}</title>${grids}${bins.map((b,i)=>{
+      const h=b.count/peak*plot.h,x=plot.x+i*cell+cell*.2,y=plot.y+plot.h-h;
+      return `<g tabindex="0" role="img" aria-label="${b.label}分：${b.count}票"><title>${b.label}分：${b.count}票</title><rect class="chart-bar" x="${x}" y="${y}" width="${cell*.6}" height="${h}" rx="3"/><text class="chart-value" x="${x+cell*.3}" y="${y-5}" text-anchor="middle">${b.count || ""}</text><text x="${x+cell*.3}" y="170" text-anchor="middle">${b.label}</text></g>`;
+    }).join("")}</svg><details class="chart-data"><summary>查看分布数据</summary><div>${bins.map(b=>`<span>${b.label}分 <b>${b.count}票</b></span>`).join("")}</div></details></div>`;
+  }
+  function ring(value, label, detail) {
+    const available=value!=null && Number.isFinite(Number(value));
+    const fraction=available?Math.min(1,Math.max(0,Number(value))):0;
+    return `<div class="ring-layout"><div class="ring-chart"><svg viewBox="0 0 140 140" role="img" aria-label="${esc(label)}：${available?pct(fraction):"暂无数据"}"><circle class="ring-track" cx="70" cy="70" r="56"/><circle class="ring-fill" cx="70" cy="70" r="56" pathLength="100" stroke-dasharray="${fraction*100} 100" transform="rotate(-90 70 70)"/></svg><div><strong>${available?pct(fraction):"—"}</strong><span>${esc(label)}</span></div></div><p>${detail}</p></div>`;
+  }
+  function coveragePanel() {
+    const sent=characters.filter(c=>imagesFor(c).some(r=>r.send_status==="sent"));
+    const rated=sent.filter(c=>c.vote_count>0).length;
+    return `<section class="surface coverage-panel"><div class="panel-heading"><span class="eyebrow">PARTICIPATION</span><h2>人物获票情况</h2></div>${ring(sent.length?rated/sent.length:null,"人物获票率",`<b>${rated}</b> 个人物已获票<br><b>${sent.length-rated}</b> 个人物已展示，暂无评分`)}<p class="panel-footnote">分母为已成功展示的人物数；不代表群成员参与率。</p></section>`;
+  }
+  function comparison(own) {
+    if ((stats.unique_voters || 0)<2) return '<p class="notice">本轮只有一位参与者，个人评分与本轮均分一致，无需重复比较。</p>';
+    return `<section class="surface comparison-panel"><div class="panel-heading"><span class="eyebrow">SCORE COMPARISON</span><h2>个人评分与本轮均分</h2></div><p class="chart-legend"><span>个人评分</span><span>本轮均分（含本人）</span></p><div class="comparison-list">${own.map(v=>{
+      const mean=byCharacter.get(v.character)?.average_score;
+      return `<div class="comparison-row"><span>${esc(v.character)}</span><div><i style="width:${Math.max(0,Math.min(100,v.score/(Number(s.score_max) || 1)*100))}%"></i><i class="comparison-mean" style="width:${mean==null?0:Math.max(0,Math.min(100,mean/(Number(s.score_max) || 1)*100))}%"></i></div><b>${v.score} / ${mean==null?"—":avg(mean)}</b></div>`;
+    }).join("")}</div><p class="panel-footnote">仅比较该参与者已评分人物；条形长度从 0 起算，上限 ${s.score_max} 分。</p></section>`;
+  }
   function bars(counts = {}) {
     const size = Number(s.score_max) - Number(s.score_min) + 1, step = size > 10 ? Math.ceil(size / 10) : 1, bins = [];
     for (let start = Number(s.score_min); start <= Number(s.score_max); start += step) {
@@ -32,22 +79,29 @@
   }
   function header() {
     const navigation = [["overview","概览"],["images","全部图片"],...(d.participant_details_available ? [["people","按参与者查看"]] : [])];
-    const cover = rows.find((row) => row.send_status === "sent");
-    return `<header class="report-header"><span class="brand">LIRATING</span><button data-action="theme" class="quiet">切换主题</button></header><section class="report-intro ${page === "overview" ? "with-cover" : ""}"><div><div class="eyebrow">人物投票报告</div><h1>${esc(s.project_name)}</h1>${page === "overview" ? '<p>按人物汇总评分，保留每位参与者的最终选择。</p>' : ""}<div class="report-meta"><span>${esc(s.status_label || s.status || "")}</span><span>评分范围 ${s.score_min}–${s.score_max}</span><span>${esc(formatTime(s.finished_at || s.started_at))}</span>${metrics.partial ? '<span class="badge neutral">图片未全部展示</span>' : ""}</div></div>${page === "overview" && cover ? `<div class="report-intro-cover" aria-hidden="true">${image(cover)}</div>` : ""}</section><nav class="report-view-nav" aria-label="报告导航">${navigation.map(([key,label]) => `<button data-page="${key}" ${page === key ? 'aria-current="page"' : ""} class="${page === key ? "active" : ""}">${label}${key === "images" ? ` (${rows.length})` : ""}</button>`).join("")}</nav>`;
+    const cover = rows.find(row => row.send_status === "sent");
+    return `<header class="report-header"><span class="brand">LIRATING <small>人物投票报告</small></span><button data-action="theme" class="quiet">切换主题</button></header><section class="report-intro ${page === "overview" ? "with-cover" : "compact"}">${cover ? `<div class="report-intro-cover" aria-hidden="true">${image(cover,true)}</div>` : ""}<div class="intro-content"><div class="eyebrow">CHARACTER VOTING JOURNAL</div><h1>${esc(s.project_name)} <span class="badge">${esc(s.status_label || s.status || "")}</span></h1><p>按人物汇总评分，记录每一次选择。</p><div class="report-meta"><span># ${esc(s.short_id || "—")}</span><span>${stats.unique_voters ?? 0} 位参与者</span><span>${characters.length} 个人物</span><span>${s.score_min}–${s.score_max} 分制</span><span>${esc(formatTime(s.finished_at || s.started_at))}</span>${metrics.partial ? '<span class="badge neutral">图片未全部展示</span>' : ""}</div></div></section><nav class="report-view-nav" aria-label="报告导航">${navigation.map(([key,label]) => `<button data-page="${key}" ${page === key ? 'aria-current="page"' : ""} class="${page === key ? "active" : ""}">${label}${key === "images" ? ` <span>${rows.length}</span>` : ""}</button>`).join("")}</nav>`;
   }
   function characterBadge(character) {
     if (!imagesFor(character).some((row) => row.send_status === "sent")) return '<span class="badge warning">未成功展示</span>';
     if (!character.vote_count) return '<span class="badge neutral">已展示，暂无评分</span>';
     return character.low_sample ? `<span class="badge warning">仅 ${character.vote_count} 票</span>` : "";
   }
-  function characterCard(character) {
-    const pictures = imagesFor(character), cover = pictures.find((row) => row.send_status === "sent") || pictures[0];
-    return `<article class="surface character-card"><div class="section-title"><div><div class="eyebrow">人物排名 ${character.rank ?? "—"}</div><h2>${esc(character.character)}</h2></div>${characterBadge(character)}</div>${cover ? `<button data-image="${esc(cover.candidate_id)}" class="character-cover">${image(cover, true)}</button>` : ""}<div class="facts"><span><b>${score(character.average_score)}</b></span><span><b>${character.vote_count}</b> 票</span><span><b>${character.candidate_count}</b> 张图片</span><span><b>${pct(character.coverage)}</b> 覆盖</span></div></article>`;
+  function characterCard(c) {
+    const cover=coverFor(c);
+    return `<article class="character-card podium-card"><div class="podium-media">${cover?`<button class="character-cover" data-image="${esc(cover.candidate_id)}" aria-label="查看 ${esc(c.character)} 的封面">${image(cover,true)}</button>`:'<div class="image-error">无图片</div>'}<span class="rank-medal rank-${c.rank}" aria-label="排名 ${c.rank}">${c.rank}</span></div><div class="podium-caption"><button data-character="${esc(c.character)}" class="text-link">${esc(c.character)}</button><div><strong>${avg(c.average_score)}<small> / ${s.score_max}</small></strong><span>${c.vote_count} 票</span></div>${characterBadge(c)}</div></article>`;
+  }
+  function rankingTable() {
+    return `<section id="full-ranking" class="surface"><div class="section-title"><div><span class="eyebrow">THE FULL RANKING</span><h2>完整人物排名</h2></div><span class="badge neutral">${characters.length} 个人物</span></div><div class="table-wrap"><table><caption class="sr-only">本轮全部人物最终排名</caption><thead><tr><th scope="col">排名</th><th scope="col">人物</th><th scope="col">均分</th><th scope="col">票数</th><th scope="col">获票覆盖</th></tr></thead><tbody>${ordered.map(c=>{
+      const cover=coverFor(c),coverage=c.coverage==null?null:Math.max(0,Math.min(1,c.coverage));
+      return `<tr><td><span class="table-rank rank-${c.rank}">${c.rank ?? "—"}</span></td><td><div class="rank-identity">${cover?image(cover):""}<div><button class="text-link ranking-name" data-character="${esc(c.character)}">${esc(c.character)}</button>${characterBadge(c)}</div></div></td><td class="num score-cell">${avg(c.average_score)}</td><td>${c.vote_count}</td><td><div class="coverage-track"><i style="width:${(coverage || 0)*100}%"></i></div><small>${pct(coverage)}</small></td></tr>`;
+    }).join("") || '<tr><td colspan="5">暂无人物</td></tr>'}</tbody></table></div><p class="panel-footnote">按均分、票数、人物首次出现顺序排列。获票覆盖 = 人物票数 / 本轮参与者人数；无评分不参与排名。</p></section>`;
   }
   function overview() {
-    const featured = ordered.filter((item) => item.vote_count).slice(0,3), counts = {};
-    characters.forEach((item) => Object.entries(item.score_distribution || {}).forEach(([key,value]) => counts[key] = (counts[key] || 0) + Number(value)));
-    return `<div class="report-metrics"><div><b>${characters.length}</b><span>人物</span></div><div><b>${stats.unique_voters ?? 0}</b><span>参与者</span></div><div><b>${stats.total_valid_votes ?? 0}</b><span>有效人物票</span></div><div><b>${metrics.sent_count ?? 0} / ${rows.length}</b><span>图片已展示</span></div></div>${stats.unique_voters === 1 ? '<p class="notice">本轮仅 1 位参与者，排名反映个人评分，不代表群体共识。</p>' : ""}<section class="report-section"><div class="section-title"><h2>高分人物</h2><a class="text-link" href="#full-ranking">查看完整排名 ↓</a></div>${featured.length ? `<div class="report-grid character-ranking">${featured.map(characterCard).join("")}</div>` : '<div class="surface empty">本轮尚无有效评分，图片仍可在「全部图片」中浏览。</div>'}</section><div class="report-analysis"><section id="full-ranking" class="surface"><div class="section-title"><h2>完整人物排名</h2><span class="muted">${characters.length} 个人物</span></div><p class="report-note">按均分降序；同分时按票数、人物首次出现顺序排列。暂无评分的人物不参与排名。</p><div class="table-wrap"><table><caption class="sr-only">本轮全部人物最终排名</caption><thead><tr><th scope="col">排名</th><th scope="col">人物</th><th scope="col">均分</th><th scope="col">票数</th></tr></thead><tbody>${ordered.map(c => `<tr><td>${c.rank ?? "—"}</td><td><button class="text-link ranking-name" data-character="${esc(c.character)}">${esc(c.character)}</button>${characterBadge(c)}</td><td class="num">${avg(c.average_score)}</td><td>${c.vote_count}</td></tr>`).join("") || '<tr><td colspan="4">暂无人物</td></tr>'}</tbody></table></div></section><div class="report-analysis-side"><section class="surface"><h2>总体分值分布</h2><p class="report-note">每张最终人物票计入一次。</p>${bars(counts)}</section>${d.ai_summary ? `<section class="surface"><h2>AI 统计解读</h2><p class="ai-copy">${esc(d.ai_summary)}</p><small>根据本轮统计自动生成，仅供参考。</small></section>` : ""}</div></div>`;
+    const featured = ordered.filter(c=>c.vote_count).slice(0,3);
+    const count=Object.values(totalCounts).reduce((sum,n)=>sum+n,0);
+    const mean=count?Object.entries(totalCounts).reduce((sum,[n,c])=>sum+Number(n)*c,0)/count:null;
+    return `<div class="report-metrics">${metric(characters.length,"人物数量")}${metric(stats.unique_voters ?? 0,"参与者","blue")}${metric(stats.total_valid_votes ?? 0,"有效人物票","green")}${metric(avg(mean),`平均分 / ${s.score_max}`)}${metric(`${metrics.sent_count ?? 0} / ${rows.length}`,"图片已展示","blue")}</div>${stats.unique_voters === 1 ? '<p class="notice">本轮仅 1 位参与者，排名反映个人评分，不代表群体共识。</p>' : ""}<div class="overview-top"><section class="surface podium-panel"><div class="section-title"><div><span class="eyebrow">HIGHEST RATED</span><h2>高分人物 <small>TOP ${featured.length}</small></h2></div><a class="text-link" href="#full-ranking">完整排名 →</a></div>${featured.length?`<div class="character-ranking">${featured.map(characterCard).join("")}</div>`:'<div class="empty">本轮尚无有效评分，图片可在「全部图片」中浏览。</div>'}</section><section class="surface distribution-panel"><div class="panel-heading"><span class="eyebrow">SCORE DISTRIBUTION</span><h2>总体分值分布</h2></div>${histogram(totalCounts)}<p class="panel-footnote">每张最终人物票计入一次 · 共 ${count} 票</p></section>${coveragePanel()}</div><div class="overview-bottom"><section class="surface ai-panel"><div class="panel-heading"><span class="eyebrow">INSIGHTS & NOTES</span><h2>${d.ai_summary?"AI 统计解读":"本轮统计说明"}</h2></div>${d.ai_summary?`<p class="ai-copy">${esc(d.ai_summary)}</p><small>根据本轮统计自动生成，仅供参考。</small>`:'<p class="ai-copy">每位参与者对每个人物只保留一张最终票。同一人物的多张图片共同作为评分参考，不单独计票或排名。</p><p class="muted">本报告未附带 AI 解读。</p>'}<div class="insight-signature">LIRATING <span>每一次选择，都有迹可循。</span></div></section>${rankingTable()}</div>`;
   }
   function imageTile(row) {
     return `<button data-image="${esc(row.candidate_id)}">${image(row)}<h3>${esc(row.display_title)}</h3><small>#${row.display_index} · ${row.send_status === "sent" ? "已展示" : row.send_status === "send_failed" ? "发送失败" : "未展示"}</small></button>`;
@@ -55,12 +109,12 @@
   function groupedImages() {
     const needle = query.toLowerCase();
     const filtered = characters.filter((c) => c.character.toLowerCase().includes(needle) || imagesFor(c).some((r) => r.display_title.toLowerCase().includes(needle)));
-    return `<p class="page-summary">图片仅作为人物素材，不单独评分或排名。</p><div class="toolbar"><label class="sr-only" for="image-search">搜索人物或图片</label><input id="image-search" type="search" placeholder="搜索人物或图片" value="${esc(query)}"><span class="count" role="status">${filtered.length} / ${characters.length} 个人物</span></div><div class="character-library">${filtered.map(c => {
+    return `<div class="library-summary"><span><b>${rows.length}</b> 张图片</span><span><b>${characters.length}</b> 个人物</span><span><b>${metrics.sent_count ?? 0}</b> 张已展示</span><p>图片是人物素材，不单独评分或排名。</p></div><div class="toolbar"><label class="sr-only" for="image-search">搜索人物或图片</label><input id="image-search" type="search" placeholder="搜索人物或图片" value="${esc(query)}"><span class="count" role="status">${filtered.length} / ${characters.length} 个人物</span></div><div class="character-library">${filtered.map(c => {
       const all = imagesFor(c), open = expanded.has(c.character);
       // A filename search must expose matching images even beyond the preview slice.
       const pictures = needle && !c.character.toLowerCase().includes(needle) ? all.filter(r => r.display_title.toLowerCase().includes(needle)) : all;
       const visible = open ? pictures : pictures.slice(0,3);
-      return `<section class="surface character-group"><div class="section-title"><div><h2>${esc(c.character)}</h2><span class="muted">${score(c.average_score)} · ${c.vote_count} 票 · ${all.length} 张图片</span></div>${characterBadge(c)}</div><div class="report-grid">${visible.map(imageTile).join("")}</div>${pictures.length > 3 ? `<button class="group-expand" data-expand="${esc(c.character)}" aria-expanded="${open}">${open ? "收起图片" : `查看全部 ${pictures.length} 张图片`}</button>` : ""}<details class="method"><summary>人物评分分布${d.participant_details_available ? "与参与者" : ""}</summary>${bars(c.score_distribution)}${d.participant_details_available ? `<div class="data-table">${votes.filter(v => v.character === c.character).sort((a,b) => b.score-a.score).map(v => { const person = people.find(p => p.id === v.participant_id); return person ? `<div class="person-row">${avatar(person)}<button class="text-link" data-person="${esc(person.id)}">${esc(person.name)}</button><span class="right">${v.score}分</span></div>` : ""; }).join("") || '<p class="muted">暂无评分</p>'}</div>` : ""}</details></section>`;
+      return `<section class="surface character-group"><div class="section-title"><div class="group-identity">${coverFor(c)?image(coverFor(c)):""}<div><h2>${esc(c.character)}</h2><span class="muted"><b class="accent">${score(c.average_score)}</b> · ${c.vote_count} 票 · ${all.length} 张图片</span></div></div>${characterBadge(c)}</div><div class="report-grid">${visible.map(imageTile).join("")}</div>${pictures.length > 3 ? `<button class="group-expand" data-expand="${esc(c.character)}" aria-expanded="${open}">${open ? "收起图片" : `查看全部 ${pictures.length} 张图片`}</button>` : ""}<details class="method"><summary>人物评分分布${d.participant_details_available ? "与参与者" : ""}</summary>${bars(c.score_distribution)}${d.participant_details_available ? `<div class="data-table">${votes.filter(v => v.character === c.character).sort((a,b) => b.score-a.score).map(v => { const person = people.find(p => p.id === v.participant_id); return person ? `<div class="person-row">${avatar(person)}<button class="text-link" data-person="${esc(person.id)}">${esc(person.name)}</button><span class="right">${v.score}分</span></div>` : ""; }).join("") || '<p class="muted">暂无评分</p>'}</div>` : ""}</details></section>`;
     }).join("") || '<div class="empty">没有匹配的人物或图片</div>'}</div>`;
   }
   function peopleMenu() {
@@ -70,7 +124,8 @@
     const person = people.find((item) => item.id === selectedPerson);
     if (!person) return '<div class="empty">暂无参与者明细</div>';
     const own = votes.filter(v => v.participant_id === person.id).sort((a,b) => personSort === "name" ? a.character.localeCompare(b.character, "zh-CN") : personSort === "low" ? a.score-b.score : b.score-a.score);
-    return `<div class="person-heading">${avatar(person)}<div><h2>${esc(person.name)}</h2><span class="muted">本轮最终人物评分</span></div></div><div class="report-metrics person-metrics"><div><b>${person.vote_count}</b><span>已评分人物</span></div><div><b>${avg(person.average_score)}</b><span>该参与者均分</span></div><div><b>${pct(person.coverage)}</b><span>人物覆盖率</span></div></div><p class="report-note">覆盖率以至少成功展示一张图片的人物为分母。本轮均分包含该参与者的评分。</p><div class="toolbar"><label for="person-sort">评分排序</label><select id="person-sort">${[["high","评分从高到低"],["low","评分从低到高"],["name","人物名称"]].map(([value,label]) => `<option value="${value}" ${personSort === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="table-wrap"><table><caption class="sr-only">${esc(person.name)}的最终人物评分</caption><thead><tr><th scope="col">人物</th><th scope="col">个人评分</th><th scope="col">本轮均分</th><th scope="col">来源图片</th></tr></thead><tbody>${own.map(v => { const c = byCharacter.get(v.character), source = byImage.get(v.source_candidate_id); return `<tr><td><button class="text-link ranking-name" data-character="${esc(v.character)}">${esc(v.character)}</button></td><td class="num accent">${v.score}</td><td class="num">${avg(c?.average_score)}</td><td>${source ? `<button class="source-image" data-image="${esc(source.candidate_id)}">${image(source)}<span>${esc(source.display_title)}</span></button>` : '<span class="muted">来源图片不可用</span>'}</td></tr>`; }).join("") || '<tr><td colspan="4">暂无评分</td></tr>'}</tbody></table></div>`;
+    const ownCounts=own.reduce((counts,v)=>{ counts[v.score]=(counts[v.score] || 0)+1; return counts; },{});
+    return `<div class="person-heading">${avatar(person)}<div><h2>${esc(person.name)}</h2><span class="muted">本轮最终人物评分</span></div></div><div class="report-metrics person-metrics">${metric(person.vote_count,"已评分人物","blue")}${metric(avg(person.average_score),"该参与者均分")}${metric(pct(person.coverage),"人物覆盖率","green")}</div><div class="person-charts"><section class="surface"><div class="panel-heading"><span class="eyebrow">PERSONAL SCORES</span><h2>个人评分分布</h2></div>${histogram(ownCounts,"个人评分分布")}</section><section class="surface"><div class="panel-heading"><span class="eyebrow">COVERAGE</span><h2>人物评分覆盖</h2></div>${ring(person.coverage,"人物覆盖率",`已给 <b>${person.vote_count}</b> 个人物评分<br>每个人物只计一张最终票`)}</section></div>${comparison(own)}<p class="report-note">覆盖率以至少成功展示一张图片的人物为分母。本轮均分包含该参与者的评分。</p><div class="toolbar"><label for="person-sort">评分排序</label><select id="person-sort">${[["high","评分从高到低"],["low","评分从低到高"],["name","人物名称"]].map(([value,label]) => `<option value="${value}" ${personSort === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="table-wrap"><table><caption class="sr-only">${esc(person.name)}的最终人物评分</caption><thead><tr><th scope="col">人物</th><th scope="col">个人评分</th><th scope="col">本轮均分</th><th scope="col">来源图片</th></tr></thead><tbody>${own.map(v => { const c = byCharacter.get(v.character), source = byImage.get(v.source_candidate_id); return `<tr><td><button class="text-link ranking-name" data-character="${esc(v.character)}">${esc(v.character)}</button></td><td class="num accent">${v.score}</td><td class="num">${avg(c?.average_score)}</td><td>${source ? `<button class="source-image" data-image="${esc(source.candidate_id)}">${image(source)}<span>${esc(source.display_title)}</span></button>` : '<span class="muted">来源图片不可用</span>'}</td></tr>`; }).join("") || '<tr><td colspan="4">暂无评分</td></tr>'}</tbody></table></div>`;
   }
 
   function peoplePage() {

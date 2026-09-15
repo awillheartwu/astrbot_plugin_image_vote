@@ -1,7 +1,6 @@
 /* DOM/interaction regression checks, no screenshots. Requires Playwright + Chrome.
    Run: NODE_PATH=<playwright package root> node tools/check_report_ui.cjs */
 const { chromium } = require('playwright');
-const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
@@ -27,6 +26,10 @@ const data = {
    await page.addScriptTag({path:path.join(root,'assets/report.js')});
   }
   await mount(data);
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+  assert.equal(await page.locator('.histogram g').count(),11);
+  assert.equal(await page.locator('.histogram g').first().getAttribute('aria-label'),'0分：1票');
+  assert.equal(await page.locator('.coverage-panel .ring-chart strong').innerText(),'66.7%');
   assert.equal(await page.locator('#full-ranking tbody tr').count(),3);
   assert.match(await page.locator('.notice').innerText(),/个人评分/);
   assert.equal(await page.locator('.ranking-name').last().innerText(),names[2]);
@@ -52,13 +55,30 @@ const data = {
   await page.locator('#people-search').pressSequentially('Reader');
   assert.equal(await page.locator('#people-search').inputValue(),'Reader');
   await page.locator('[data-action="theme"]').click();
-  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
   await page.locator('#person-detail [data-character]').first().click();
   assert.equal(await page.locator('#image-search').inputValue(),'Zero');
+  // Multiple participants: comparisons use exactly the selected person's votes.
+  await mount({...data,statistics:{unique_voters:2,total_valid_votes:2}});
+  await page.locator('[data-page="people"]').click();
+  assert.equal(await page.locator('.comparison-row').count(),2);
+  assert.match(await page.locator('.chart-legend').innerText(),/含本人/);
+  // Configurable bounds, including the legal degenerate 0-only scale.
+  for (const [min,max] of [[1,4],[0,100],[0,0]]) {
+    const payload=JSON.parse(JSON.stringify(data));
+    payload.session.score_min=min; payload.session.score_max=max;
+    payload.characters.forEach((c,i)=>{c.score_distribution=i===0?{[min]:1,[max]:1}:{};});
+    await mount(payload);
+    assert.equal(await page.locator('.histogram g').count(),Math.ceil((max-min+1)/Math.max(1,Math.ceil((max-min+1)/11))));
+    assert.equal(await page.locator('svg').evaluateAll(els=>els.some(el=>/NaN|Infinity/.test(el.outerHTML))),false);
+    await page.locator('.chart-data summary').click();
+    assert.equal(await page.locator('.chart-data').getAttribute('open'),'');
+  }
   await mount({...data,participant_details_available:false,participants:[],votes:[]});
   assert.equal(await page.locator('[data-page="people"]').count(),0);
   await mount({...data,characters:[],candidates:[],participants:[],votes:[],statistics:{},metrics:{}});
   assert.match(await page.locator('.report-body').innerText(),/尚无有效评分/);
+  assert.equal(await page.locator('.coverage-panel .ring-chart strong').innerText(),'—');
   await page.locator('[data-page="people"]').click();
   assert.match(await page.locator('#person-detail').innerText(),/暂无参与者明细/);
   assert.deepEqual(errors,[]);

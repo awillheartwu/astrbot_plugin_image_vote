@@ -16,6 +16,27 @@ class SessionStatus(str, Enum):
     FAILED = "FAILED"
 
 
+STATUS_LABELS = {
+    SessionStatus.IDLE: "未开始",
+    SessionStatus.PREPARING: "准备中",
+    SessionStatus.RUNNING: "轮播中",
+    SessionStatus.PAUSED: "已暂停",
+    SessionStatus.FINALIZING: "正在结算",
+    SessionStatus.COMPLETED: "已完成",
+    SessionStatus.CANCELLED: "已取消",
+    SessionStatus.FAILED: "失败",
+}
+
+
+def status_label(status) -> str:
+    """群消息与面板共用的中文状态名；未知状态回退到原始枚举值。"""
+    try:
+        key = status if isinstance(status, SessionStatus) else SessionStatus(status)
+    except ValueError:
+        return str(status)
+    return STATUS_LABELS.get(key, key.value)
+
+
 class SendStatus(str, Enum):
     PENDING = "pending"
     SENT = "sent"
@@ -40,6 +61,21 @@ class Candidate:
     character: Optional[str] = None
     send_status: SendStatus = SendStatus.PENDING
     sent_at: Optional[str] = None
+    # 发送时由轮播循环写入的进度上下文，只用于拼群消息文案，不落库。
+    send_context: Optional["SendContext"] = None
+
+
+@dataclass(frozen=True)
+class SendContext:
+    """一条投票消息在整个项目里的位置：第几位人物、该人物第几张、这条含几张。"""
+
+    character_ordinal: int = 1
+    character_total: int = 1
+    image_ordinal: int = 1
+    image_span: int = 1
+    image_count: int = 1
+    group_ordinal: int = 1
+    group_total: int = 1
 
 
 @dataclass

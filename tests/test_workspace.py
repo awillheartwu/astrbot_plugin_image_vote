@@ -190,6 +190,16 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['sessions'][0]['report_state'],'failed')
         self.assertTrue(result['sessions'][0]['report_available'])
 
+    async def test_report_cleaned_and_never_generated_are_distinct_states(self):
+        generated = self.root/'out'/'gone'
+        await self.store.save_session(Session('cleaned','cleaned','g1','umo','demo','/unused',status=SessionStatus.COMPLETED,
+             output_path=str(generated)))
+        await self.store.save_session(Session('never','never','g2','umo','demo','/unused',status=SessionStatus.COMPLETED))
+        result=await self.service.sessions()
+        states={row['id']: row['report_state'] for row in result['sessions']}
+        self.assertEqual(states['cleaned'],'cleaned')
+        self.assertEqual(states['never'],'missing')
+
     async def test_countdown_decreases_and_pauses(self):
         from src.session_manager import SessionControl
         control=SessionControl()

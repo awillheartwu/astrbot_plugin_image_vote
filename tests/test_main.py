@@ -303,27 +303,45 @@ class MainTest(unittest.TestCase):
             asyncio.run(scenario(Path(directory)))
 
     def test_control_replies_describe_the_action(self):
-        session = Session(
-            "s1", "A1B2C3D4", "g1", "umo", "海滨之家", "/pictures/x", SessionStatus.RUNNING,
-            candidate_count=19, current_index=7,
-        )
-        paused = ImageVotePlugin._control_reply("pause", session)
-        self.assertIn("已暂停：海滨之家", paused)
-        self.assertIn("进度：7 / 19", paused)
-        self.assertIn("/vote resume", paused)
-        self.assertIn("项目：海滨之家 · Session：A1B2C3D4 · 状态：RUNNING", paused)
+        async def scenario(root):
+            plugin = ImageVotePlugin(TempContext(root))
+            await plugin.store.initialize()
+            session = Session(
+                "s1", "A1B2C3D4", "g1", "umo", "海滨之家", "/pictures/x", SessionStatus.RUNNING,
+                candidate_count=19, current_index=7, character_count=2, active_character="Elis",
+            )
+            await plugin.store.save_session(session)
+            await plugin.store.save_candidates([
+                Candidate("c%d" % index, "s1", index, "a.png", "a.png", "Alice-%d" % index, index, 1,
+                          character="Alice")
+                for index in range(1, 5)
+            ] + [
+                Candidate("c%d" % index, "s1", index, "b.png", "b.png", "Elis-%d" % index, index, 1,
+                          character="Elis")
+                for index in range(5, 12)
+            ])
+            paused = await plugin._control_reply("pause", session)
+            self.assertIn("已暂停：海滨之家", paused)
+            self.assertIn("进度：7 / 19 张（第 2/2 位人物 · 该人物第 3/7 张）", paused)
+            self.assertIn("当前人物：Elis（已收 0 票）", paused)
+            self.assertIn("/vote resume", paused)
+            self.assertIn("项目：海滨之家 · Session：A1B2C3D4 · 状态：轮播中", paused)
 
-        resumed = ImageVotePlugin._control_reply("resume", session)
-        self.assertIn("已继续：海滨之家", resumed)
-        self.assertIn("从第 8 张接着发送", resumed)
+            resumed = await plugin._control_reply("resume", session)
+            self.assertIn("已继续：海滨之家", resumed)
+            self.assertIn("从第 8 张接着发送", resumed)
 
-        finished = ImageVotePlugin._control_reply("finish", session)
-        self.assertIn("已请求提前结束", finished)
-        self.assertIn("按现有票数结算", finished)
+            finished = await plugin._control_reply("finish", session)
+            self.assertIn("已请求提前结束", finished)
+            self.assertIn("按现有票数结算", finished)
 
-        stopped = ImageVotePlugin._control_reply("stop", session)
-        self.assertIn("已取消本次投票", stopped)
-        self.assertIn("/vote export", stopped)
+            stopped = await plugin._control_reply("stop", session)
+            self.assertIn("已取消本次投票", stopped)
+            self.assertIn("/vote export", stopped)
+            await plugin.store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
 
     def test_control_command_without_session_replies_clearly(self):
         async def scenario(root):

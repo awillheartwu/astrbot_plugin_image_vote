@@ -781,7 +781,7 @@ class ApplicationTest(unittest.TestCase):
             self.assertEqual(persisted.status, SessionStatus.PAUSED)
             self.assertEqual(persisted.current_index, 4)
             self.assertEqual(len(notified), 1)
-            self.assertIn("连续 2 张", notified[0][1])
+            self.assertIn("连续 2 条消息发送失败", notified[0][1])
             self.assertEqual(notified[0][0], "umo")
             await store.close()
 

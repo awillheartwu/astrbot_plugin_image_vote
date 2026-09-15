@@ -141,6 +141,39 @@ class ReportGeneratorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
+    def test_report_shows_chinese_session_status(self):
+        async def scenario(root):
+            source_root = root / "input"
+            output_root = root / "output"
+            source_root.mkdir()
+            source = source_root / "one.png"
+            source.write_bytes(b"original")
+            candidate = Candidate("c1", "s1", 1, source.name, source.name, "One", None, source.stat().st_size, character="One")
+            distribution = {score: 0 for score in range(0, 11)}
+            distribution[8] = 2
+            statistics = SessionStatistics(
+                total_candidates=1,
+                total_valid_votes=2,
+                unique_voters=2,
+                average_votes_per_candidate=2.0,
+                overall_average_score=8.0,
+                candidates=(CandidateStatistics("c1", 1, "One", 2, 8.0, distribution, 1),),
+                characters=(CharacterStatistics("One", 1, 2, 8.0, distribution, 1),),
+            )
+            session = Session(
+                "s1", "A7F3", "g1", "umo", "project", str(source_root), SessionStatus.COMPLETED,
+                candidate_count=1, score_min=0, score_max=10,
+            )
+            report = await DirectoryReportGenerator().generate(
+                session, [candidate], statistics, source_root, output_root, FakeImageProcessor()
+            )
+            page = (report / "index.html").read_text(encoding="utf-8")
+            self.assertIn("状态 已完成", page)
+            self.assertNotIn("状态 COMPLETED", page)
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
     def test_character_ranking_groups_images_under_the_same_person(self):
         async def scenario(root, merged):
             source_root = root / "input"

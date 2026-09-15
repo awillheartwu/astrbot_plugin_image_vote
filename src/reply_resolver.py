@@ -7,7 +7,8 @@ from typing import Mapping, Optional
 from .models import Candidate
 
 
-VOTE_MARKER_RE = re.compile(r"\[投票\s+(?P<index>\d+)\s*/\s*(?P<total>\d+)\s+·\s*(?P<short_id>[A-Za-z0-9]+)\]")
+# 群消息首行的定位标记：0.13.3 起用【】，旧消息仍是 []，两种都要能解析。
+VOTE_MARKER_RE = re.compile(r"[\[【]投票\s+(?P<index>\d+)\s*/\s*(?P<total>\d+)\s*·\s*(?P<short_id>[A-Za-z0-9]+)[\]】]")
 INTERNAL_MARKER_RE = re.compile(r"\[VOTE:(?P<short_id>[A-Za-z0-9]+):(?P<index>\d+)\]")
 
 

@@ -84,6 +84,23 @@ class VoteCollectorTest(unittest.TestCase):
         self.assertEqual(decision.source_type, VoteSource.QUOTED_REPLY)
         invalid_reply = ReplyPayload(message_str="[投票 003/010 · OLD1]")
         self.assertIsNone(VoteRouter().route("4", session, active, {3: quoted, 10: active}, invalid_reply))
+
+    def test_quoted_vote_accepts_the_current_message_layout(self):
+        """0.13.3 的群消息首行换成【投票 012/045 · 短ID】，引用投票仍要能定位。"""
+        session = Session("session-1", "A7F3", "group-1", "umo", "project", "/tmp/project", SessionStatus.RUNNING)
+        active = candidate(10)
+        quoted = candidate(3)
+        reply = ReplyPayload(message_str="【投票 003/010 · A7F3】project · Three\n第 1/1 位人物 · 本人物共 1 张")
+        decision = VoteRouter().route("4", session, active, {3: quoted, 10: active}, reply)
+        self.assertEqual(decision.candidate_id, quoted.id)
+        self.assertEqual(decision.source_type, VoteSource.QUOTED_REPLY)
+
+    def test_quoted_vote_rejects_a_foreign_session_marker(self):
+        session = Session("session-1", "A7F3", "group-1", "umo", "project", "/tmp/project", SessionStatus.RUNNING)
+        active = candidate(10)
+        quoted = candidate(3)
+        reply = ReplyPayload(message_str="【投票 003/010 · OLD1】project · Three")
+        self.assertIsNone(VoteRouter().route("4", session, active, {3: quoted, 10: active}, reply))
         self.assertIsNone(
             VoteRouter(allow_quoted_vote_after_window=False).route(
                 "4", session, active, {3: quoted, 10: active}, reply

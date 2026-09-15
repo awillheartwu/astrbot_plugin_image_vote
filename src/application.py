@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional, Sequence
 
 from .config import VoteConfig
-from .character_service import character_of
+from .character_service import character_layout, character_of
 from .ai_summary_service import AiSummaryService, build_summary_statistics
 from .logging_utils import get_logger
-from .models import Candidate, SendStatus, Session, SessionStatus, Vote, VoteDecision
+from .models import Candidate, SendContext, SendStatus, Session, SessionStatus, Vote, VoteDecision
 from .path_guard import PathGuard
 from .persistence import SQLiteStore
 from .project_service import ProjectService
@@ -175,6 +175,8 @@ class VoteApplication:
         try:
             consecutive_failures = 0
             merge_character_images = bool(getattr(self.config, "merge_character_images", False))
+            merge_limit = int(getattr(self.config, "merge_character_images_max", 0) or 0)
+            layout = character_layout(candidates)
             sent_through = session.current_index
             for index in range(session.current_index, len(candidates)):
                 if index < sent_through:
@@ -199,10 +201,12 @@ class VoteApplication:
                     if merge_character_images
                     else [candidate]
                 )
-                merge_limit = int(getattr(self.config, "merge_character_images_max", 0) or 0)
                 if merge_character_images and merge_limit > 0:
                     # 一条消息里的图片数有上限：帧太大时 NapCat/QQ 会直接断开连接。
                     group = group[:merge_limit]
+                candidate.send_context = self._send_context(
+                    layout, index, len(group), merge_character_images, merge_limit
+                )
                 paths = [
                     PathGuard(Path(session.project_path)).ensure_within(
                         Path(session.project_path) / member.source_relative_path, allow_root=False
@@ -244,7 +248,7 @@ class VoteApplication:
                     session.error_message = detail
                     consecutive_failures += 1
                     logger.warning(
-                        "session %s 第 %d-%d 张发送失败（连续第 %d 批）；本人物已有成功图片时仍继续接收人物票：%s",
+                        "session %s 第 %d-%d 张这一条发送失败（连续第 %d 条）；本人物已有成功图片时仍继续接收人物票：%s",
                         session.short_id,
                         candidate.display_index,
                         group[-1].display_index,
@@ -376,7 +380,7 @@ class VoteApplication:
     async def _pause_for_recovery(self, session: Session) -> None:
         """插件卸载/重载导致的停止：留下可恢复的暂停态，等管理员 /vote resume。"""
         session.status = SessionStatus.PAUSED
-        session.error_message = "plugin unloaded while running; resume explicitly"
+        session.error_message = "插件卸载或重载导致轮播中断，已暂停；执行 /vote resume 可继续。"
         await self.store.save_session(session)
         logger.info(
             "session %s 因插件卸载/重载暂停在第 %d 张，可用 /vote resume 继续",
@@ -386,12 +390,13 @@ class VoteApplication:
 
     async def _pause_after_send_failures(self, session: Session, failures: int) -> None:
         session.status = SessionStatus.PAUSED
-        session.error_message = "%d consecutive send failures" % failures
+        session.error_message = "连续 %d 条消息发送失败，已自动暂停" % failures
         await self.store.save_session(session)
-        logger.error("session %s 连续 %d 张发送失败，已自动暂停", session.short_id, failures)
+        logger.error("session %s 连续 %d 条消息发送失败，已自动暂停", session.short_id, failures)
         await self._notify(
             session.umo,
-            "投票已自动暂停：连续 %d 张图片发送失败。请检查机器人状态，由管理员执行 /vote resume 继续。" % failures,
+            "投票已自动暂停：连续 %d 条消息发送失败（一条消息可能含多张图）。\n"
+            "请检查机器人状态，由管理员执行 /vote resume 继续。" % failures,
         )
 
     async def _notify(self, umo: str, text: str) -> None:
@@ -439,7 +444,7 @@ class VoteApplication:
     async def recover_incomplete_sessions(self) -> None:
         for session in await self.store.list_incomplete_sessions():
             session.status = SessionStatus.PAUSED
-            session.error_message = "paused after plugin restart; resume explicitly"
+            session.error_message = "插件重启后暂停，未自动继续；执行 /vote resume 可继续。"
             await self.store.save_session(session)
             logger.info(
                 "恢复未完成 session %s（群 %s）为 PAUSED，进度 %d/%d",
@@ -657,6 +662,27 @@ class VoteApplication:
             group.append(candidates[index])
             index += 1
         return group
+
+    @staticmethod
+    def _send_context(layout, index: int, span: int, merged: bool, merge_limit: int):
+        """把「第几位人物、第几张、这条含几张」整理成群消息文案用的上下文。"""
+        character_ordinal, image_ordinal, image_count = layout[index]
+        character_total = max(item[0] for item in layout)
+        if merged and merge_limit > 0:
+            group_total = max(1, -(-image_count // merge_limit))
+            group_ordinal = (image_ordinal - 1) // merge_limit + 1
+        else:
+            group_total = image_count
+            group_ordinal = image_ordinal
+        return SendContext(
+            character_ordinal=character_ordinal,
+            character_total=character_total,
+            image_ordinal=image_ordinal,
+            image_span=span,
+            image_count=image_count,
+            group_ordinal=group_ordinal,
+            group_total=group_total,
+        )
 
     def _next_wait_seconds(self, session: Session, is_last: bool, elapsed: float) -> int:
         """A character window always starts after its final image finishes sending."""

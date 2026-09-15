@@ -19,7 +19,7 @@ from typing import Dict, Iterable, List, Optional, Protocol
 
 from .character_service import character_of
 from .logging_utils import get_logger
-from .models import Candidate, Session, SessionStatistics, Vote
+from .models import Candidate, Session, SessionStatistics, Vote, status_label
 from .report_data import enrich_report
 from .path_guard import PathGuard, UnsafePathError
 from .report_activity import ReportBusyError
@@ -116,6 +116,7 @@ class DirectoryReportGenerator:
                 "candidate_count": session.candidate_count,
                 "character_count": session.character_count,
                 "status": session.status.value,
+                "status_label": status_label(session.status),
                 "score_min": session.score_min,
                 "score_max": session.score_max,
                 "started_at": session.started_at,
@@ -367,7 +368,7 @@ class DirectoryReportGenerator:
             html.escape(str(session["project_name"])),
             html.escape(str(session["short_id"])),
             html.escape(str(session.get("group_id", "汇总分享版"))),
-            html.escape(str(session["status"])),
+            html.escape(str(session.get("status_label") or session["status"])),
             session["score_min"],
             session["score_max"],
             html.escape(_format_time(session.get("started_at"))),

@@ -32,6 +32,7 @@ _avatar_module = _internal("src.avatar_service")
 _activity_module = _internal("src.report_activity")
 _workspace_module = _internal("src.workspace_api")
 _models_module = _internal("src.models")
+_character_service_module = _internal("src.character_service")
 
 register = _compat.register
 filter = _compat.filter
@@ -67,6 +68,8 @@ DirectoryReportGenerator = _report_generator_module.DirectoryReportGenerator
 PillowImageProcessor = _image_processor_module.PillowImageProcessor
 AiSummaryService = _ai_module.AiSummaryService
 SessionStatus = _models_module.SessionStatus
+character_layout = _character_service_module.character_layout
+status_label = _models_module.status_label
 get_logger = _logging.get_logger
 
 logger = get_logger()
@@ -373,7 +376,7 @@ class ImageVotePlugin(Star):
                 return
             try:
                 session = await getattr(self.application, command)(group_id)
-                yield self._plain_result(event, self._control_reply(command, session))
+                yield self._plain_result(event, await self._control_reply(command, session))
             except SessionNotFoundError:
                 yield self._plain_result(event, "当前群没有进行中的投票。")
             except Exception as exc:
@@ -448,11 +451,12 @@ class ImageVotePlugin(Star):
             )
             yield self._plain_result(
                 event,
-                "已开始投票：%s\n人物数量：%d，图片数量：%d\n人物间隔：%d 秒\n评分范围：%d-%d\n预计耗时：%s"
+                "已开始投票：%s\n人物数量：%d，图片数量：%d\n发送方式：%s\n人物间隔：%d 秒\n评分范围：%d-%d\n预计耗时：%s"
                 % (
                     session.project_name,
                     session.character_count,
                     session.candidate_count,
+                    self._send_mode_label(),
                     session.interval_seconds,
                     self.settings.score_min,
                     self.settings.score_max,
@@ -601,8 +605,7 @@ class ImageVotePlugin(Star):
             return candidates[session.current_index - 1]
         return None
 
-    @staticmethod
-    def _control_reply(command: str, session) -> str:
+    async def _control_reply(self, command: str, session) -> str:
         """控制指令的确认回复：让人一眼看出触发了什么、当前进度和下一步。"""
         head = {
             "pause": "已暂停",
@@ -610,10 +613,17 @@ class ImageVotePlugin(Star):
             "finish": "已请求提前结束",
             "stop": "已取消本次投票",
         }.get(command, "已执行 %s" % command)
+        candidates = await self.store.list_candidates(session.id)
         lines = [
             "%s：%s" % (head, session.project_name),
-            "进度：%d / %d" % (session.current_index, session.candidate_count),
+            "进度：%d / %d 张%s"
+            % (session.current_index, session.candidate_count, self._character_position(session, candidates)),
         ]
+        character = session.active_character
+        if character:
+            votes = await self.store.list_votes(session.id)
+            received = sum(1 for vote in votes if vote.character == character)
+            lines.append("当前人物：%s（已收 %d 票）" % (character, received))
         if command == "pause":
             lines.append("倒计时已冻结，已发出的图片仍可引用投票；执行 /vote resume 继续。")
         elif command == "resume":
@@ -623,9 +633,24 @@ class ImageVotePlugin(Star):
         elif command == "stop":
             lines.append("已收到的投票保留，不会自动生成报告；需要时执行 /vote export。")
         lines.append(
-            "项目：%s · Session：%s · 状态：%s" % (session.project_name, session.short_id, session.status.value)
+            "项目：%s · Session：%s · 状态：%s"
+            % (session.project_name, session.short_id, status_label(session.status))
         )
         return "\n".join(lines)
+
+    @staticmethod
+    def _character_position(session, candidates) -> str:
+        """「（第 2/17 位人物 · 该人物第 3/7 张）」；一张都没发出去时返回空串。"""
+        if not candidates or session.current_index <= 0:
+            return ""
+        layout = character_layout(candidates)
+        ordinal, image_ordinal, image_count = layout[min(session.current_index, len(candidates)) - 1]
+        return "（第 %d/%d 位人物 · 该人物第 %d/%d 张）" % (
+            ordinal,
+            max(item[0] for item in layout),
+            image_ordinal,
+            image_count,
+        )
 
     def _relative_output_path(self, path):
         try:
@@ -645,6 +670,15 @@ class ImageVotePlugin(Star):
         if minutes:
             return "约 %d 分钟" % minutes
         return "约 %d 秒" % seconds
+
+    def _send_mode_label(self) -> str:
+        """本轮图片怎么发：逐张，还是同一个人物合并成一条（受每条上限约束）。"""
+        if not self.settings.merge_character_images:
+            return "逐张发送（同一人物的图片连续发出）"
+        limit = self.settings.merge_character_images_max
+        if limit and limit > 0:
+            return "合并发送（同一人物一条消息，每条最多 %d 张）" % limit
+        return "合并发送（同一人物一条消息）"
 
     def _check_text(self, snapshot, project_name: str = "") -> str:
         numbered = sum(1 for item in snapshot.candidates if item.sequence_number is not None)
@@ -761,6 +795,7 @@ class ImageVotePlugin(Star):
         return (
             "已重新读取配置（来源：%s）\n"
             "发送间隔：%d 秒\n"
+            "发送方式：%s\n"
             "最后一张额外等待：%d 秒\n"
             "评分范围：%d-%d\n"
             "重复投票：%s\n"
@@ -770,6 +805,7 @@ class ImageVotePlugin(Star):
             % (
                 self._config_source,
                 settings.default_interval_seconds,
+                self._send_mode_label(),
                 settings.effective_final_grace_seconds,
                 settings.score_min,
                 settings.score_max,
@@ -794,21 +830,46 @@ class ImageVotePlugin(Star):
         current_votes = sum(1 for vote in votes if current_character and vote.character == current_character)
         next_candidate = candidates[session.current_index] if session.current_index < len(candidates) else None
         countdown = managed.control.seconds_until_next if managed is not None else None
-        current_label = "尚未发送" if current_character is None else current_character
-        if countdown is not None:
-            next_label = "%d 秒后" % max(0, int(round(countdown)))
-        elif next_candidate is not None:
-            next_label = "#%03d %s" % (next_candidate.display_index, next_candidate.display_title)
-        else:
-            next_label = "无"
-        return "项目：%s\n状态：%s\n图片进度：%d / %d\n当前人物：%s\n本人物已投：%d 人\n总投票：%d\n下一张：%s\nSession：%s" % (
-            session.project_name,
-            session.status.value,
-            session.current_index,
-            session.candidate_count,
-            current_label,
-            current_votes,
-            len(votes),
-            next_label,
-            session.short_id,
+        return (
+            "项目：%s\n"
+            "状态：%s\n"
+            "图片进度：%d / %d 张%s\n"
+            "当前人物：%s\n"
+            "本人物已收：%d 票\n"
+            "总投票：%d\n"
+            "下一步：%s\n"
+            "Session：%s"
+            % (
+                session.project_name,
+                status_label(session.status),
+                session.current_index,
+                session.candidate_count,
+                self._character_position(session, candidates),
+                current_character or "尚未发送",
+                current_votes,
+                len(votes),
+                self._next_step_label(session, candidates, next_candidate, countdown),
+                session.short_id,
+            )
         )
+
+    def _next_step_label(self, session, candidates, next_candidate, countdown) -> str:
+        """下一张（合并模式下是下一组）会发什么，以及还要等多少秒。"""
+        if next_candidate is None:
+            return "无（本场图片已发完）"
+        layout = character_layout(candidates)
+        start = session.current_index
+        ordinal, image_ordinal, image_count = layout[start]
+        character = next_candidate.character or next_candidate.display_title
+        limit = self.settings.merge_character_images_max if self.settings.merge_character_images else 0
+        span = 1
+        while limit > 0 and span < limit and start + span < len(candidates) and layout[start + span][0] == ordinal:
+            span += 1
+        if span > 1:
+            body = "第 %d-%d/%d 张（本条 %d 张）" % (image_ordinal, image_ordinal + span - 1, image_count, span)
+        else:
+            body = "第 %d/%d 张" % (image_ordinal, image_count)
+        label = "%s %s · 第 %d/%d 位人物" % (character, body, ordinal, max(item[0] for item in layout))
+        if countdown is not None:
+            label += " · 约 %d 秒后" % max(0, int(round(countdown)))
+        return label

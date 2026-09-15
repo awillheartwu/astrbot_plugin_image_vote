@@ -254,7 +254,10 @@ class WorkspaceService:
             row['report_available'] = available
             row['report_state'] = ('generating' if self.app.report_activity.exporting(session.id)
                                    or (managed and session.status == SessionStatus.COMPLETED)
-                                   else 'failed' if error else 'ready' if available else 'missing')
+                                   else 'failed' if error
+                                   else 'ready' if available
+                                   else 'cleaned' if session.output_path
+                                   else 'missing')
             row['report_error'] = error
             row['active_candidate'] = next(({'id': c.id, 'name': c.display_title, 'index': c.display_index} for c in candidates if c.id == session.active_candidate_id), None)
             row['active_character'] = session.active_character

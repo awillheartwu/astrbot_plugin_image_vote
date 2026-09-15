@@ -90,7 +90,7 @@ class VoteCollectorTest(unittest.TestCase):
         session = Session("session-1", "A7F3", "group-1", "umo", "project", "/tmp/project", SessionStatus.RUNNING)
         active = candidate(10)
         quoted = candidate(3)
-        reply = ReplyPayload(message_str="【投票 003/010 · A7F3】project · Three\n第 1/1 位人物 · 本人物共 1 张")
+        reply = ReplyPayload(message_str="project · Three\n第 1/1 位人物 · 本人物共 1 张\n回复 1-4 给「Three」打分\n[投票 003/010 · A7F3]")
         decision = VoteRouter().route("4", session, active, {3: quoted, 10: active}, reply)
         self.assertEqual(decision.candidate_id, quoted.id)
         self.assertEqual(decision.source_type, VoteSource.QUOTED_REPLY)
@@ -99,7 +99,7 @@ class VoteCollectorTest(unittest.TestCase):
         session = Session("session-1", "A7F3", "group-1", "umo", "project", "/tmp/project", SessionStatus.RUNNING)
         active = candidate(10)
         quoted = candidate(3)
-        reply = ReplyPayload(message_str="【投票 003/010 · OLD1】project · Three")
+        reply = ReplyPayload(message_str="project · Three\n[投票 003/010 · OLD1]")
         self.assertIsNone(VoteRouter().route("4", session, active, {3: quoted, 10: active}, reply))
         self.assertIsNone(
             VoteRouter(allow_quoted_vote_after_window=False).route(

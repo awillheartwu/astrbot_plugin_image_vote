@@ -36,7 +36,8 @@ class AstrBotAdapterTest(unittest.TestCase):
         )
         candidate = Candidate("c1", "s1", 3, "three.png", "three.png", "Three", None, 1)
         text = build_vote_message(session, candidate)
-        self.assertIn("【投票 003/010 · A7F3】海滨之家 · Three", text)
+        self.assertEqual(text.splitlines()[0], "海滨之家 · Three")
+        self.assertIn("[投票 003/010 · A7F3]", text)
         self.assertNotIn("[VOTE:", text)
         self.assertEqual(text.count("A7F3"), 1)
 
@@ -59,7 +60,8 @@ class AstrBotAdapterTest(unittest.TestCase):
             group_ordinal=3, group_total=7,
         )
         text = build_vote_message(session, candidate, relay)
-        self.assertIn("【投票 012/045 · A7F3】帝国编年史015 · Elis", text)
+        self.assertEqual(text.splitlines()[0], "帝国编年史015 · Elis")
+        self.assertIn("[投票 012/045 · A7F3]", text)
         self.assertIn("第 2/17 位人物 · 第 3/7 张 · 之后还有 4 张", text)
         self.assertIn("回复 0-10 给「Elis」打分", text)
 

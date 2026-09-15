@@ -67,10 +67,12 @@ class VoteMessageProgressTest(unittest.TestCase):
 
     @staticmethod
     def _expected(short_id, index, total, character, position):
-        return (
-            "【投票 %03d/%03d · %s】demo · %s\n%s\n回复 1-4 给「%s」打分\n引用本场任意图片可改分"
-            % (index, total, short_id, character, position, character)
-        )
+        return "\n".join([
+            "demo · %s" % character,
+            position,
+            "回复 1-4 给「%s」打分 · 引用本场任意图片可改分" % character,
+            "[投票 %03d/%03d · %s]" % (index, total, short_id),
+        ])
 
     def test_single_image_messages_track_character_and_image_progress(self):
         async def scenario(root):

@@ -8,26 +8,21 @@ from .models import Candidate, SendContext, Session
 
 
 def build_vote_message(session: Session, candidate: Candidate, context: Optional[SendContext] = None) -> str:
-    """群里的投票消息：首行「项目 · 人物」，次行人物与张数进度，提示语单独成行。
+    """群里的投票消息：首行只放「项目 · 人物」，第二行给进度，第三行是打分方法，
+    最后一行才是引用投票的定位标记（见 reply_resolver 的 VOTE_MARKER_RE）。
 
-    首行的「【投票 012/045 · A5935BC8】」是引用投票的定位标记（见 reply_resolver），
-    改动格式必须同步改 VOTE_MARKER_RE，否则引用图片改分会失效。
+    标记放在末行不会影响引用投票：AstrBot 的 aiocqhttp 适配器收到 reply 段会用
+    get_msg 取回被引用消息的完整文本与 chain，解析时扫描整段文本。
     """
     context = context or candidate.send_context or SendContext()
     character = candidate.character or candidate.display_title
     return "\n".join(
         [
-            "【投票 %03d/%03d · %s】%s · %s"
-            % (
-                candidate.display_index,
-                session.candidate_count,
-                session.short_id,
-                session.project_name,
-                character,
-            ),
+            "%s · %s" % (session.project_name, character),
             _position_line(context),
-            "回复 %d-%d 给「%s」打分" % (session.score_min, session.score_max, character),
-            "引用本场任意图片可改分",
+            "回复 %d-%d 给「%s」打分 · 引用本场任意图片可改分"
+            % (session.score_min, session.score_max, character),
+            "[投票 %03d/%03d · %s]" % (candidate.display_index, session.candidate_count, session.short_id),
         ]
     )
 

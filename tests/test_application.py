@@ -46,7 +46,7 @@ class ApplicationTest(unittest.TestCase):
             await store.initialize()
             observed = []
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 observed.append((candidate.character, candidate.sequence_number, session.active_character))
 
             application = VoteApplication(
@@ -77,8 +77,8 @@ class ApplicationTest(unittest.TestCase):
             await store.initialize()
             sent = []
 
-            async def sender(session, candidate, image_path):
-                sent.append((candidate.display_index, image_path.name))
+            async def sender(session, candidate, image_paths):
+                sent.append((candidate.display_index, image_paths[0].name))
 
             application = VoteApplication(
                 config,
@@ -143,6 +143,57 @@ class ApplicationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(Path(directory)))
 
+    def test_merged_sending_groups_a_characters_images_into_one_message(self):
+        async def scenario(root):
+            input_root = root / "projects"
+            project_root = input_root / "demo"
+            project_root.mkdir(parents=True)
+            for name in (
+                "screenshot0001 - Elis - aaaa1111.png",
+                "screenshot0002 - Elis - bbbb2222.png",
+                "screenshot0003 - Elis - cccc3333.png",
+                "screenshot0004 - Solo - dddd4444.png",
+            ):
+                (project_root / name).write_bytes(b"x")
+            config = VoteConfig.from_mapping({
+                "input_root": str(input_root),
+                "output_root": str(root / "reports"),
+                "merge_character_images": True,
+            })
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            calls = []
+
+            async def sender(session, candidate, image_paths):
+                calls.append((candidate.display_title, [path.name for path in image_paths]))
+
+            application = VoteApplication(
+                config, ProjectService(input_root), store, SessionManager(), VoteRouter(), sender=sender
+            )
+            session = await application.prepare_session("g1", "umo", "demo")
+            session.interval_seconds = 0
+            session.final_grace_seconds = 0
+            candidates = await store.list_candidates(session.id)
+
+            async def runner(current_session, control):
+                await application.run_session(current_session, candidates, control)
+
+            await application.sessions.start(session, runner)
+            managed = await application.sessions.active_for_group("g1")
+            await asyncio.wait_for(managed.task, timeout=2)
+            self.assertEqual([len(paths) for _, paths in calls], [3, 1], calls)
+            self.assertEqual(calls[0][0], "Elis")
+            session.status = SessionStatus.RUNNING
+            session.active_character = "Elis"
+            await application.record_vote(session, candidates, "4", "u1", "Alice", candidates[0])
+            votes = await store.list_votes(session.id)
+            self.assertEqual([(vote.candidate_id, vote.character, vote.score) for vote in votes],
+                             [(candidates[0].id, "Elis", 4)])
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
     def test_runner_continues_after_one_send_failure(self):
         async def scenario(root):
             input_root = root / "projects"
@@ -155,7 +206,7 @@ class ApplicationTest(unittest.TestCase):
             await store.initialize()
             sent = []
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 if candidate.display_index == 1:
                     raise RuntimeError("temporary send failure")
                 sent.append(candidate.display_index)
@@ -192,7 +243,7 @@ class ApplicationTest(unittest.TestCase):
             first_sent = asyncio.Event()
             sent = []
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 sent.append(candidate.display_index)
                 first_sent.set()
 
@@ -229,7 +280,7 @@ class ApplicationTest(unittest.TestCase):
             await store.initialize()
             sent = []
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 sent.append(candidate.display_index)
 
             application = VoteApplication(config, ProjectService(input_root), store, SessionManager(), VoteRouter(), sender=sender)
@@ -263,7 +314,7 @@ class ApplicationTest(unittest.TestCase):
             sent = []
             application = None
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 sent.append(candidate.display_index)
                 if candidate.display_index == 1:
                     await application.finish("g1")
@@ -298,7 +349,7 @@ class ApplicationTest(unittest.TestCase):
             sent = []
             box = {}
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 sent.append(candidate.display_index)
                 if candidate.display_index == 1:
                     asyncio.get_event_loop().call_later(
@@ -341,7 +392,7 @@ class ApplicationTest(unittest.TestCase):
             await store.initialize()
             entered = asyncio.Event()
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 entered.set()
                 await asyncio.Event().wait()
 
@@ -377,7 +428,7 @@ class ApplicationTest(unittest.TestCase):
             await store.initialize()
             entered = asyncio.Event()
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 entered.set()
                 await asyncio.Event().wait()
 
@@ -429,7 +480,7 @@ class ApplicationTest(unittest.TestCase):
             await store.initialize()
             third = asyncio.Event()
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 if candidate.display_index == 2:
                     raise RuntimeError("temporary send failure")
                 if candidate.display_index == 3:
@@ -480,7 +531,7 @@ class ApplicationTest(unittest.TestCase):
             store = SQLiteStore(root / "state" / "vote.db")
             await store.initialize()
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 return None
 
             application = VoteApplication(
@@ -643,7 +694,7 @@ class ApplicationTest(unittest.TestCase):
             store = SQLiteStore(root / "state" / "vote.db")
             await store.initialize()
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 return None
 
             async def file_sender(umo, path, name):
@@ -698,7 +749,7 @@ class ApplicationTest(unittest.TestCase):
             store = SQLiteStore(root / "state" / "vote.db")
             await store.initialize()
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 if candidate.display_index >= 3:
                     raise RuntimeError("send failed")
 
@@ -755,7 +806,7 @@ class ApplicationTest(unittest.TestCase):
             store = SQLiteStore(root / "state" / "vote.db")
             await store.initialize()
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 if candidate.display_index in {1, 3}:
                     raise RuntimeError("send failed")
 
@@ -815,7 +866,7 @@ class ApplicationTest(unittest.TestCase):
             store = SQLiteStore(root / "state" / "vote.db")
             await store.initialize()
 
-            async def sender(session, candidate, image_path):
+            async def sender(session, candidate, image_paths):
                 return None
 
             async def notifier(umo, text):

@@ -174,7 +174,11 @@ class VoteApplication:
         )
         try:
             consecutive_failures = 0
+            merge_character_images = bool(getattr(self.config, "merge_character_images", False))
+            sent_through = session.current_index
             for index in range(session.current_index, len(candidates)):
+                if index < sent_through:
+                    continue
                 await control.wait_if_paused()
                 if control.stop_requested:
                     await self._cancel_session(session)
@@ -190,54 +194,75 @@ class VoteApplication:
                     session.active_candidate_id = None
                     session.active_character = None
                     await self.store.save_session(session)
-                source_path = PathGuard(Path(session.project_path)).ensure_within(
-                    Path(session.project_path) / candidate.source_relative_path, allow_root=False
+                group = (
+                    self._character_image_group(candidates, index)
+                    if merge_character_images
+                    else [candidate]
                 )
+                paths = [
+                    PathGuard(Path(session.project_path)).ensure_within(
+                        Path(session.project_path) / member.source_relative_path, allow_root=False
+                    )
+                    for member in group
+                ]
                 started_at = asyncio.get_event_loop().time()
                 try:
-                    await self.sender(session, candidate, source_path)
-                    candidate.send_status = SendStatus.SENT
-                    candidate.sent_at = utc_now()
+                    await self.sender(session, candidate, paths)
+                    for member in group:
+                        member.send_status = SendStatus.SENT
+                        member.sent_at = utc_now()
                     session.active_candidate_id = candidate.id
                     session.active_character = candidate_character
                     consecutive_failures = 0
                     logger.debug(
-                        "session %s 已发送第 %d/%d 张：%s",
+                        "session %s 已发送第 %d-%d/%d 张（%s）：%s",
                         session.short_id,
                         candidate.display_index,
+                        group[-1].display_index,
                         len(candidates),
-                        candidate.source_relative_path,
+                        candidate_character,
+                        "、".join(member.source_relative_path for member in group),
                     )
                 except Exception as exc:
-                    candidate.send_status = SendStatus.SEND_FAILED
+                    for member in group:
+                        member.send_status = SendStatus.SEND_FAILED
                     session.error_message = str(exc)
                     consecutive_failures += 1
                     logger.warning(
-                        "session %s 第 %d 张发送失败（连续第 %d 张）；本人物已有成功图片时仍继续接收人物票：%s",
+                        "session %s 第 %d-%d 张发送失败（连续第 %d 批）；本人物已有成功图片时仍继续接收人物票：%s",
                         session.short_id,
                         candidate.display_index,
+                        group[-1].display_index,
                         consecutive_failures,
                         exc,
                     )
                 elapsed = asyncio.get_event_loop().time() - started_at
                 logger.debug(
-                    "session %s 第 %d 张发送耗时 %.1f 秒", session.short_id, candidate.display_index, elapsed
+                    "session %s 第 %d-%d 张发送耗时 %.1f 秒",
+                    session.short_id,
+                    candidate.display_index,
+                    group[-1].display_index,
+                    elapsed,
                 )
-                is_last = index == len(candidates) - 1
+                session.current_index = index + len(group)
+                sent_through = session.current_index
+                is_last = session.current_index >= len(candidates)
                 next_is_same_character = (
-                    not is_last and character_of(candidates[index + 1]) == candidate_character
+                    not merge_character_images
+                    and not is_last
+                    and character_of(candidates[session.current_index]) == candidate_character
                 )
                 if session.interval_seconds > 0 and not next_is_same_character and not is_last and elapsed > session.interval_seconds:
                     logger.warning(
-                        "session %s 第 %d 张发送耗时 %.1f 秒，超过设定间隔 %d 秒；默认语义下实际出图间隔为两者之和，"
+                        "session %s 第 %d-%d 张发送耗时 %.1f 秒，超过设定间隔 %d 秒；"
                         "人物内部仍连续发送；本人物全部图片发完后会等待完整间隔",
                         session.short_id,
                         candidate.display_index,
+                        group[-1].display_index,
                         elapsed,
                         session.interval_seconds,
                     )
-                session.current_index = index + 1
-                await self.store.save_candidates([candidate])
+                await self.store.save_candidates(group)
                 await self.store.save_session(session)
                 limit = self.config.send_failure_pause_threshold
                 if limit and consecutive_failures >= limit:
@@ -606,6 +631,17 @@ class VoteApplication:
             self.config.score_min,
             self.config.score_max,
         )
+
+    @staticmethod
+    def _character_image_group(candidates: Sequence[Candidate], start: int) -> list:
+        """合并发送时，把从 start 开始连续同人物的图片合成一组。"""
+        character = character_of(candidates[start])
+        group = [candidates[start]]
+        index = start + 1
+        while index < len(candidates) and character_of(candidates[index]) == character:
+            group.append(candidates[index])
+            index += 1
+        return group
 
     def _next_wait_seconds(self, session: Session, is_last: bool, elapsed: float) -> int:
         """A character window always starts after its final image finishes sending."""

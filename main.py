@@ -579,8 +579,8 @@ class ImageVotePlugin(Star):
         method = getattr(event, "plain_result", None)
         return method(text) if callable(method) else text
 
-    async def _send_candidate(self, session, candidate, image_path):
-        return await self.message_sender.send_candidate(session, candidate, image_path)
+    async def _send_candidate(self, session, candidate, image_paths):
+        return await self.message_sender.send_candidate(session, candidate, image_paths)
 
     @staticmethod
     def _candidate_index(candidates, candidate_id):

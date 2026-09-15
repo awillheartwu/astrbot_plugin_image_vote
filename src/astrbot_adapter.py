@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 from .reply_resolver import ReplyPayload
 
@@ -12,15 +12,19 @@ class AstrBotAdapter:
     def __init__(self, context: Any):
         self.context = context
 
-    async def send_vote_message(self, umo: str, text: str, image_path: Path) -> Optional[str]:
+    async def send_vote_message(self, umo: str, text: str, image_paths: Sequence[Path]) -> Optional[str]:
         try:
             from astrbot.api.event import MessageChain
 
-            chain = MessageChain().message(text).file_image(str(image_path))
+            chain = MessageChain().message(text)
+            for path in image_paths:
+                chain = chain.file_image(str(path))
         except (ImportError, AttributeError):
             from astrbot.api.message_components import Image, Plain
 
-            chain = self._message_chain([Plain(text), Image.fromFileSystem(str(image_path))])
+            chain = self._message_chain(
+                [Plain(text), *[Image.fromFileSystem(str(path)) for path in image_paths]]
+            )
         result = await self.context.send_message(umo, chain)
         if result is False:
             raise RuntimeError("AstrBot could not resolve unified message origin")

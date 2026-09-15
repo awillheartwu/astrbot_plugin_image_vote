@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, Sequence
 
 from .models import Candidate, Session
 
@@ -26,7 +26,7 @@ def build_vote_message(session: Session, candidate: Candidate) -> str:
     )
 
 
-SendFunction = Callable[[str, str, Path], Awaitable[Optional[str]]]
+SendFunction = Callable[[str, str, Sequence[Path]], Awaitable[Optional[str]]]
 
 
 class MessageSender:
@@ -35,12 +35,12 @@ class MessageSender:
         self.max_retries = max_retries
         self.retry_base_seconds = retry_base_seconds
 
-    async def send_candidate(self, session: Session, candidate: Candidate, image_path: Path) -> Optional[str]:
+    async def send_candidate(self, session: Session, candidate: Candidate, image_paths: Sequence[Path]) -> Optional[str]:
         text = build_vote_message(session, candidate)
         last_error = None
         for attempt in range(self.max_retries + 1):
             try:
-                return await self.send_function(session.umo, text, image_path)
+                return await self.send_function(session.umo, text, image_paths)
             except Exception as exc:
                 last_error = exc
                 if attempt >= self.max_retries:

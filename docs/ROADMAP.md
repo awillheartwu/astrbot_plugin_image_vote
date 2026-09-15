@@ -1,6 +1,6 @@
 # 路线图与差距清单
 
-> 2026-09-13 更新：N1–N5 的报告与插件工作区已落地于 0.12.0；下方旧差距表保留为历史基线，当前实现和验收状态以 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 为准。
+> 2026-09-15 更新：0.13.0 已完成“按人物连续发送、每人每人物一票、报告按人物归类”的本地实现。待办只剩真实 QQ 群试跑后核对发送时序、数据库人物票和最终报告；下方旧差距表保留为历史基线，当前实现和验收状态以 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 为准。
 
 更新时间：2026-09-11。基线：`docs/REQUIREMENTS.md`（1751 行）＋ 真机验收结果（AstrBot 4.27.5 / NapCat / 本地 Portainer stack）。
 

@@ -24,9 +24,10 @@ OneBot、SQLite、Pillow、AstrBot provider
 
 - `config.py`：默认配置和运行时校验。
 - `models.py`：Session、Candidate、Vote、统计结果和状态枚举。
-- `project_scanner.py`：编号文件名、普通文件名、混合命名、manifest 顺序和快照。
+- `project_scanner.py`：编号文件名、普通文件名、混合命名、manifest 顺序、人物识别，以及按首次出现位置进行稳定人物分组。
+- `character_service.py`：发送、投票、统计和报告共用的人物身份兜底规则。
 - `path_guard.py`：输入路径和报告清理的统一安全校验。
-- `vote_collector.py`：严格单字符评分解析、当前窗口路由、引用旧图路由。
+- `vote_collector.py`：严格评分解析、当前人物窗口路由，以及“引用图片 → 所属人物”的路由。
 - `persistence.py`：SQLite schema、Session/Candidate/Vote UPSERT 边界。
 - `session_manager.py`：每群一个可暂停、可恢复、可取消的 asyncio task。
 - `report_generator.py`：目录式报告、派生图片入口、相对路径和 marker。
@@ -41,7 +42,9 @@ SQLite 表为 `sessions`、`candidates`、`votes`。
 
 - `sessions.id` 是全局 session ID；`short_id` 只用于群消息标记。
 - `candidates.id` 不依赖数组 index，且由应用层按 session 作用域生成；`display_index` 只表示当前快照中的展示顺序。
-- `votes` 的唯一键是 `(session_id, candidate_id, voter_id)`，重复投票使用 last vote wins。
+- `sessions.active_character` 是普通数字票的当前人物目标，`active_candidate_id` 只保留最近成功发送图片的来源信息。
+- `votes.character_name` 是票的统计目标，唯一键是 `(session_id, character_name, voter_id)`；`candidate_id` 记录触发该人物最终票的来源图片。
+- 同一人物图片在候选快照中连续排列；人物第一张成功发送后开放投票，最后一张发送完成后才开始完整人物间隔。
 - `source_relative_path` 永远相对项目根目录，报告和群消息不暴露绝对路径。
 
 ## Reply 解析方案
@@ -52,7 +55,11 @@ SQLite 表为 `sessions`、`candidates`、`votes`。
 2. 先匹配展示标记 `[投票 003/126 · A7F3]`，同时兼容内部标记 `[VOTE:A7F3:3]`。
 3. `ReplyResolver` 校验 session short ID，再通过 display index 查当前快照候选。
 4. 适配器无法提供引用文本时，可在 OneBot 边界用 message ID 回查，再重新生成 `ReplyPayload`。
-5. 任何解析失败都返回 `None`，不会把引用票错误地记到当前图片。
+5. 解析成功后读取图片所属人物；任何解析失败都返回 `None`，不会把引用票错误地记到当前人物。
+
+## 报告数据口径
+
+报告 schema v3 以 `characters` 为排名与评分主表，`candidates` 只保存人物分组、图片来源、发送状态和派生图路径。参与者明细的每条票包含 `character` 与 `source_candidate_id`：前者用于人物统计，后者用于追溯最后一次有效评分来自哪张引用图。目录版和单文件版使用同一份人物分组界面。
 
 ## 目标实例已确认的事实（2026-09-11 现场探针）
 

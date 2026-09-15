@@ -13,6 +13,8 @@ DEFAULT_CONFIG = {
     "default_interval_seconds": 20,
     "final_grace_seconds": 20,
     "merge_character_images": False,
+    "merge_character_images_max": 3,
+    "send_timeout_seconds": 90,
     "score_min": 1,
     "score_max": 4,
     "same_user_vote_policy": "last_wins",
@@ -69,6 +71,8 @@ class VoteConfig:
     default_interval_seconds: int = 20
     final_grace_seconds: int = 20
     merge_character_images: bool = False
+    merge_character_images_max: int = 3
+    send_timeout_seconds: int = 90
     score_min: int = 1
     score_max: int = 4
     same_user_vote_policy: str = "last_wins"

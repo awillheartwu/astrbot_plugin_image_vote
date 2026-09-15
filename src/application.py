@@ -199,6 +199,10 @@ class VoteApplication:
                     if merge_character_images
                     else [candidate]
                 )
+                merge_limit = int(getattr(self.config, "merge_character_images_max", 0) or 0)
+                if merge_character_images and merge_limit > 0:
+                    # 一条消息里的图片数有上限：帧太大时 NapCat/QQ 会直接断开连接。
+                    group = group[:merge_limit]
                 paths = [
                     PathGuard(Path(session.project_path)).ensure_within(
                         Path(session.project_path) / member.source_relative_path, allow_root=False
@@ -207,7 +211,13 @@ class VoteApplication:
                 ]
                 started_at = asyncio.get_event_loop().time()
                 try:
-                    await self.sender(session, candidate, paths)
+                    timeout = float(getattr(self.config, "send_timeout_seconds", 0) or 0)
+                    if timeout > 0:
+                        await asyncio.wait_for(
+                            self.sender(session, candidate, paths), timeout=timeout
+                        )
+                    else:
+                        await self.sender(session, candidate, paths)
                     for member in group:
                         member.send_status = SendStatus.SENT
                         member.sent_at = utc_now()
@@ -224,9 +234,14 @@ class VoteApplication:
                         "、".join(member.source_relative_path for member in group),
                     )
                 except Exception as exc:
+                    detail = (
+                        "发送超时（超过 %s 秒未返回）" % timeout
+                        if isinstance(exc, asyncio.TimeoutError)
+                        else str(exc)
+                    )
                     for member in group:
                         member.send_status = SendStatus.SEND_FAILED
-                    session.error_message = str(exc)
+                    session.error_message = detail
                     consecutive_failures += 1
                     logger.warning(
                         "session %s 第 %d-%d 张发送失败（连续第 %d 批）；本人物已有成功图片时仍继续接收人物票：%s",
@@ -234,7 +249,7 @@ class VoteApplication:
                         candidate.display_index,
                         group[-1].display_index,
                         consecutive_failures,
-                        exc,
+                        detail,
                     )
                 elapsed = asyncio.get_event_loop().time() - started_at
                 logger.debug(

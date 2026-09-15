@@ -56,6 +56,18 @@
         "default": false,
         "hint": "关闭（默认）时逐张发送，同一人物的图连续发出、之间不等待；开启后一个人物只发一条消息，内含该人物的全部图片，发送耗时是这些图片上传时间的总和，但省掉了逐张消息的开销，回复一次分数即给该人物打分。"
       },
+      "merge_character_images_max": {
+        "description": "合并发送时一条消息最多几张图",
+        "type": "int",
+        "default": 3,
+        "hint": "实测：一条消息里放太多图会把 WebSocket 帧撑爆、导致连接断开。超过这个数量的图片会拆成多条消息，人物投票窗口不变。"
+      },
+      "send_timeout_seconds": {
+        "description": "单条消息发送超时（秒）",
+        "type": "int",
+        "default": 90,
+        "hint": "超过这个时间没有发送结果就按发送失败处理，避免连接异常时整场卡死。"
+      },
       "final_grace_seconds": {
         "description": "最后一个人物的等待（秒）",
         "type": "int",

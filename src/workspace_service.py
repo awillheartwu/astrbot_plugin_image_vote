@@ -43,7 +43,7 @@ class WorkspaceService:
         self._thumbnails = {}
         self.schema = json.loads((Path(__file__).resolve().parents[1] / '_conf_schema.json').read_text())
 
-    async def _inspect(self, name: str, recursive: bool):
+    async def inspect_cached(self, name: str, recursive: bool):
         """带 20 秒 TTL 的项目快照：预检与 6 张缩略图共用一次扫描结果。"""
         key = (name, bool(recursive))
         now = asyncio.get_running_loop().time()
@@ -187,7 +187,7 @@ class WorkspaceService:
 
     async def preview(self, name):
         settings = self.plugin.project_service.resolve_options(name)
-        snapshot = await self._inspect(name, settings.get('recursive', self.plugin.settings.recursive_scan))
+        snapshot = await self.inspect_cached(name, settings.get('recursive', self.plugin.settings.recursive_scan))
         interval = settings.get('interval_seconds', self.plugin.settings.default_interval_seconds)
         character_count = len({character_of(candidate) for candidate in snapshot.candidates})
         root = Path(self.plugin.settings.output_root).expanduser()

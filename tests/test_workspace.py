@@ -131,6 +131,40 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
             self.service.browse(str((self.root/'input').resolve()),'../')
         self.assertEqual({p['name'] for p in self.service.projects()},{'demo','registered'})
 
+    async def test_thumbnail_endpoint_reuses_one_scan_and_caches_images(self):
+        """缩略图接口必须复用快照缓存并走图片缓存；这条路径曾因写错作用域整段报错。"""
+        self.plugin.project_registry.register('registered', self.root/'input'/'demo')
+        scans = []
+        original = self.plugin.project_service.inspect
+        self.plugin.project_service.inspect = lambda name, recursive=False: (scans.append(name), original(name, recursive))[1]
+        calls = []
+        self.service.thumbnail_data_uri = lambda source, box=480: (calls.append(str(source)), 'data:image/webp;base64,TEST')[1]
+        api = WorkspaceAPI(self.plugin)
+        api.service = self.service
+        first = await api.thumbnail({'project': 'registered', 'index': 1})
+        second = await api.thumbnail({'project': 'registered', 'index': 1})
+        self.assertEqual(first['image'], 'data:image/webp;base64,TEST')
+        self.assertEqual(second['image'], 'data:image/webp;base64,TEST')
+        # 两次请求只允许扫描一次项目（第二次命中 20 秒快照缓存）。
+        self.assertEqual(scans, ['registered'])
+        self.assertEqual(len(calls), 2)
+
+    async def test_preflight_embeds_thumbnails_when_pillow_is_available(self):
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            self.skipTest('Pillow 未安装')
+        import base64
+        png = base64.b64decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
+        )
+        (self.root/'input'/'demo'/'one.png').write_bytes(png)
+        self.plugin.project_registry.register('registered', self.root/'input'/'demo')
+        preview = await self.service.preview('registered')
+        self.assertTrue(str(preview['first'][0].get('thumb')).startswith('data:image/webp;base64,'))
+        endpoint = await WorkspaceAPI(self.plugin).thumbnail({'project': 'registered', 'index': 1})
+        self.assertTrue(endpoint['image'].startswith('data:image/webp;base64,'))
+
     async def test_recovered_session_finish_does_not_send_remaining_images(self):
         session=await self.plugin.application.prepare_session('g','umo','demo')
         session.status=SessionStatus.PAUSED

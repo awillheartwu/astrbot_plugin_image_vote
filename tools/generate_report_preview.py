@@ -1,9 +1,10 @@
-"""Generate real reports from disposable example votes and the prototype illustrations."""
+"""Generate real reports from disposable example votes and synthetic image fixtures."""
 import asyncio
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.sample_project import create_sample_project
 from src.image_processor import PillowImageProcessor
 from src.models import Candidate, SendStatus, Session, SessionStatus, Vote, VoteSource
 from src.report_generator import DirectoryReportGenerator
@@ -11,8 +12,9 @@ from src.statistics_service import calculate_statistics
 
 
 async def main():
-    root = Path(__file__).resolve().parents[1] / 'prototypes' / 'image-vote'
+    root = Path('/tmp/lirating-report-preview')
     source = root / 'assets'
+    create_sample_project(source)
     session = Session('preview-session', 'PREVIEW', '示例讨论组', 'preview', '海滨之家 · 示例报告',
                       str(source), status=SessionStatus.COMPLETED, score_max=5, candidate_count=3, character_count=2,
                       started_at='2026-09-12T14:00:00+08:00', finished_at='2026-09-12T14:03:00+08:00')

@@ -9,7 +9,6 @@ import asyncio
 import importlib.util
 import json
 import secrets
-import shutil
 import sys
 import tempfile
 from contextlib import asynccontextmanager
@@ -42,8 +41,8 @@ def build_host(astrbot_source):
     root = Path(state.name)
     project = root/'projects'/'海滨之家'
     project.mkdir(parents=True)
-    for file in (REPO/'prototypes/image-vote/assets').glob('*.png'):
-        shutil.copyfile(file, project/file.name)
+    from tools.sample_project import create_sample_project
+    create_sample_project(project)
     token = secrets.token_hex(24)
 
     class Config(dict):

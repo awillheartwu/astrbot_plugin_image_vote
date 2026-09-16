@@ -26,6 +26,7 @@ DEFAULT_CONFIG = {
     "report_include_participants": True,
     "report_include_avatars": True,
     "report_image_format": "webp",
+    "report_image_policy": "character_cover",
     "report_image_max_width": 1920,
     "report_image_max_height": 1920,
     "report_image_quality": 82,
@@ -82,6 +83,7 @@ class VoteConfig:
     report_mode: str = "directory"
     report_include_participants: bool = True
     report_include_avatars: bool = True
+    report_image_policy: str = "character_cover"
     report_image_format: str = "webp"
     report_image_max_width: int = 1920
     report_image_max_height: int = 1920
@@ -133,6 +135,8 @@ class VoteConfig:
             )
         if self.report_mode not in {"directory", "single_html"}:
             raise ValueError("report_mode must be directory or single_html")
+        if self.report_image_policy not in {"character_cover", "all"}:
+            raise ValueError("report_image_policy must be character_cover or all")
         if self.report_image_format.lower() not in {"webp", "jpeg", "jpg", "png"}:
             raise ValueError("unsupported report image format")
         for name in ("report_image_quality", "thumbnail_quality"):

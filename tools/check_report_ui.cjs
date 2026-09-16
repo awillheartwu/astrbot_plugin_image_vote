@@ -102,9 +102,21 @@ const data = {
   await firstAvatar.hover();
   assert.equal(await firstAvatar.locator('.voter-tooltip').isVisible(),true);
   assert.equal(await page.locator('.voter-avatar img').first().evaluate(el=>el.getBoundingClientRect().width),32);
-  assert.ok(await page.locator('dialog .histogram').evaluate(el=>el.getBoundingClientRect().width)<=360);
+  assert.ok(await page.locator('dialog .histogram').evaluate(el=>el.getBoundingClientRect().width>200));
   await firstAvatar.click();
-  assert.ok(await page.locator('.person-charts .histogram').evaluate(el=>el.getBoundingClientRect().width)<=360);
+  await page.waitForFunction(()=>{const el=document.querySelector('.person-charts .histogram');return Number(el.dataset.width)===Math.round(el.getBoundingClientRect().width)});
+  assert.ok(await page.locator('.person-charts .histogram').evaluate(el=>Math.abs(el.getBoundingClientRect().width-(el.parentElement.clientWidth-40))<2));
+  assert.equal(await page.locator('.person-charts .histogram svg').evaluate(el=>el.getBoundingClientRect().height),206);
+  const pooled=JSON.parse(JSON.stringify(data));
+  pooled.image_assets={'asset:0':svg};
+  pooled.candidates.forEach(r=>{r.main_image=r.thumbnail='asset:0';r.image_quality='thumbnail';});
+  await mount(pooled);
+  assert.equal(await page.locator('.report-intro-cover img').getAttribute('src'),svg);
+  await page.locator('[data-page="images"]').click();
+  await page.locator('[data-image]').first().click();
+  assert.equal(await page.locator('dialog > img').getAttribute('src'),svg);
+  assert.match(await page.locator('dialog').innerText(),/缩略图/);
+  await page.locator('dialog [data-close]').click();
   // Structured summary escapes HTML; old text remains accessible under disclosure.
   await mount({...data,ai_summary:'stored JSON',ai_analysis:{headline:'<headline>',insights:[{title:'Small sample',text:'<script>bad()</script>'}],closing:'Done'}});
   assert.equal(await page.locator('.ai-headline').innerText(),'<headline>');

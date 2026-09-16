@@ -158,6 +158,7 @@ class ImageVotePlugin(Star):
             sender=self._send_candidate,
             report_generator=DirectoryReportGenerator(
                 image_extension=self.settings.report_image_format,
+                image_policy=self.settings.report_image_policy,
                 avatar_service=_avatar_module.AvatarService(data_dir / 'avatar_cache')
                 if self.settings.report_include_avatars and self.settings.report_include_participants else None,
             ),

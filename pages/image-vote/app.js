@@ -163,11 +163,14 @@
     const value = draft[key],
       id = "field-" + key,
       label = definition.description || key;
+    const optionLabel = (option) => key === "report_image_policy"
+      ? ({ character_cover: "每个人物一张高清，其余缩略图（省体积）", all: "全部图片保留高清（便于放大）" }[option] || option)
+      : option;
     let input;
     if (definition.type === "bool")
       input = `<input id="${id}" type="checkbox" data-field="${key}" ${value ? "checked" : ""}>`;
     else if (definition.options)
-      input = `<select id="${id}" data-field="${key}">${definition.options.map((o) => `<option value="${esc(o)}" ${String(value) === String(o) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+      input = `<select id="${id}" data-field="${key}">${definition.options.map((o) => `<option value="${esc(o)}" ${String(value) === String(o) ? "selected" : ""}>${esc(optionLabel(o))}</option>`).join("")}</select>`;
     else if (key === "ai_provider_id")
       input = `<select id="${id}" data-field="${key}"><option value="">跟随群的默认模型</option>${providers.map((p) => `<option value="${esc(p.id)}" ${value === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}${value && !providers.some((p) => p.id === value) ? `<option selected value="${esc(value)}">${esc(value)}（当前不可用）</option>` : ""}</select>`;
     else if (definition.type === "text" || definition.type === "list")

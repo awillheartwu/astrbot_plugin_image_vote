@@ -197,6 +197,16 @@
         "type": "bool",
         "default": true,
         "hint": "从 QQ 头像服务获取并缓存派生图，失败显示姓名首字。汇总分享版不获取头像。"
+      },
+      "report_image_policy": {
+        "description": "报告高清图片策略",
+        "type": "string",
+        "default": "character_cover",
+        "options": [
+          "character_cover",
+          "all"
+        ],
+        "hint": "character_cover：每个人物保留首张成功展示图片的高清派生图，其余只保留缩略图（推荐）；all：每张都保留高清派生图。原图不修改。"
       }
     }
   },

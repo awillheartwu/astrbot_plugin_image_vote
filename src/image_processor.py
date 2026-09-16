@@ -64,6 +64,21 @@ class PillowImageProcessor:
             thumbnail_size=thumbnail_path.stat().st_size,
         )
 
+    def process_thumbnail(self, source_path: Path, thumbnail_path: Path) -> None:
+        try:
+            from PIL import Image, ImageOps
+        except ImportError as exc:
+            raise ImageProcessingUnavailable("Pillow is required for report image processing") from exc
+        thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+        with Image.open(str(source_path)) as source:
+            image = ImageOps.exif_transpose(source)
+        # Match the existing thumbnail constraints without encoding a discarded main image.
+        image.thumbnail((self.max_width, self.max_height), Image.Resampling.LANCZOS)
+        if image.width > self.thumbnail_width:
+            height = max(1, round(image.height * self.thumbnail_width / image.width))
+            image = image.resize((self.thumbnail_width, height), Image.Resampling.LANCZOS)
+        self._save(image, thumbnail_path, self.thumbnail_quality)
+
     def _save(self, image, path: Path, quality: int) -> None:
         format_name = "JPEG" if self.image_format in {"jpg", "jpeg"} else self.image_format.upper()
         save_image = image

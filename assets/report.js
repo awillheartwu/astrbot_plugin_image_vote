@@ -18,8 +18,9 @@
   const score = (v) => v == null ? "暂无评分" : `${Number(v).toFixed(2)} / ${s.score_max}`;
   const pct = (v) => v == null ? "—" : (Number(v) * 100).toFixed(1) + "%";
   const formatTime = (v) => v && !Number.isNaN(Date.parse(v)) ? new Date(v).toLocaleString("zh-CN", {hour12:false}) : "—";
-  const image = (row, main = false) => `<img src="${esc((main ? row.main_image : row.thumbnail) || "")}" alt="${esc(row.display_title)}" loading="lazy">`;
-  const avatar = (person) => person.avatar ? `<img class="avatar" src="${esc(person.avatar)}" alt="">` : `<span class="placeholder" aria-hidden="true">${esc((person.name || "?").slice(0,1))}</span>`;
+  const assetUrl = value => d.image_assets?.[value] || value || "";
+  const image = (row, main = false) => `<img src="${esc(assetUrl(main ? row.main_image : row.thumbnail))}" alt="${esc(row.display_title)}" loading="lazy">`;
+  const avatar = (person) => person.avatar ? `<img class="avatar" src="${esc(assetUrl(person.avatar))}" alt="">` : `<span class="placeholder" aria-hidden="true">${esc((person.name || "?").slice(0,1))}</span>`;
   // All charts use report data and inline SVG: no network or export dependencies.
   document.documentElement.dataset.theme ||= "dark";
   const coverFor = c => imagesFor(c).find(r => r.send_status === "sent") || imagesFor(c)[0];
@@ -34,7 +35,7 @@
   function metric(value, label, tone = "violet") {
     return `<div class="metric-card tone-${tone}"><span class="metric-label">${label}</span><b>${value}</b><i aria-hidden="true"></i></div>`;
   }
-  function histogram(counts, title = "评分分布") {
+  function histogram(counts, title = "评分分布", width = 340) {
     const min = Number(s.score_min), max = Number(s.score_max);
     const step = Math.max(1, Math.ceil((max-min+1)/11)), bins = [];
     for (let start=min; start<=max; start+=step) {
@@ -44,14 +45,14 @@
       bins.push({label:start===end?`${start}`:`${start}–${end}`,count, high:isHigh(start)});
     }
     const peak=Math.max(3,Math.ceil(Math.max(0,...bins.map(b=>b.count))/3)*3);
-    const plot={x:32,y:20,w:292,h:130}, cell=plot.w/bins.length;
+    const plot={x:32,y:20,w:Math.max(220,width-48),h:150}, cell=plot.w/bins.length;
     const grids=Array.from({length:4},(_,i)=>{
       const y=plot.y+plot.h-i*plot.h/3;
-      return `<line x1="32" y1="${y}" x2="324" y2="${y}" class="chart-grid"/><text x="24" y="${y+4}" text-anchor="end">${peak*i/3}</text>`;
+      return `<line x1="32" y1="${y}" x2="${width-16}" y2="${y}" class="chart-grid"/><text x="24" y="${y+4}" text-anchor="end">${peak*i/3}</text>`;
     }).join("");
-    return `<div class="chart histogram"><svg viewBox="0 0 340 186" role="img" aria-label="${esc(title)}，横轴为分数，纵轴为票数"><title>${esc(title)}</title>${grids}${bins.map((b,i)=>{
+    return `<div class="chart histogram" data-counts="${esc(JSON.stringify(counts))}" data-title="${esc(title)}"><svg viewBox="0 0 ${width} 206" role="img" aria-label="${esc(title)}，横轴为分数，纵轴为票数"><title>${esc(title)}</title>${grids}${bins.map((b,i)=>{
       const h=b.count/peak*plot.h,x=plot.x+i*cell+cell*.2,y=plot.y+plot.h-h;
-      return `<g tabindex="0" role="img" aria-label="${b.label}分：${b.count}票"><title>${b.label}分：${b.count}票</title><rect class="chart-bar ${b.high ? "chart-high" : ""}" x="${x}" y="${y}" width="${cell*.6}" height="${h}" rx="3"/><text class="chart-value" x="${x+cell*.3}" y="${y-5}" text-anchor="middle">${b.count || ""}</text><text x="${x+cell*.3}" y="170" text-anchor="middle">${b.label}</text></g>`;
+      return `<g tabindex="0" role="img" aria-label="${b.label}分：${b.count}票"><title>${b.label}分：${b.count}票</title><rect class="chart-bar ${b.high ? "chart-high" : ""}" x="${x}" y="${y}" width="${cell*.6}" height="${h}" rx="3"/><text class="chart-value" x="${x+cell*.3}" y="${y-5}" text-anchor="middle">${b.count || ""}</text><text x="${x+cell*.3}" y="190" text-anchor="middle">${b.label}</text></g>`;
     }).join("")}</svg>${highLegend()}<details class="chart-data"><summary>查看分布数据</summary><div>${bins.map(b=>`<span>${b.label}分 <b>${b.count}票</b></span>`).join("")}</div></details></div>`;
   }
   function ring(value, label, detail) {
@@ -152,17 +153,33 @@
   function footer() {
     return `<details class="method"><summary>统计口径与场次信息</summary><p>人物是唯一评分单位；同一参与者对同一人物只保留一票。图片仅作为人物素材，不单独排名。普通数字归属当前人物，引用本场图片归属该图片对应人物。</p><p>会话 ${esc(s.short_id)}${s.group_id ? " · 群 " + esc(s.group_id) : ""} · ${esc(s.status_label || s.status)}</p></details>`;
   }
+  const chartObserver = new ResizeObserver(entries => {
+    for (const {target,contentRect} of entries) {
+      const width=Math.round(contentRect.width);
+      if(width<268 || target.dataset.width===String(width)) continue;
+      target.dataset.width=String(width);
+      const template=document.createElement("template");
+      template.innerHTML=histogram(JSON.parse(target.dataset.counts),target.dataset.title,width);
+      target.querySelector("svg").replaceWith(template.content.querySelector("svg"));
+    }
+  });
+  function observeCharts() {
+    chartObserver.disconnect();
+    document.querySelectorAll(".histogram").forEach(el=>chartObserver.observe(el));
+  }
   function render() {
     const focused = document.activeElement;
     const id = focused?.id, start = focused?.selectionStart, end = focused?.selectionEnd;
     const key = focused?.dataset?.expand;
     root.innerHTML = header() + `<div class="report-body">${page === "overview" ? overview() : page === "images" ? groupedImages() : peoplePage()}</div>` + footer();
+    observeCharts();
     const replacement = id ? document.getElementById(id) : key ? [...root.querySelectorAll("[data-expand]")].find(el => el.dataset.expand === key) : null;
     if (replacement) { replacement.focus({preventScroll:true}); if (start != null && replacement.setSelectionRange) replacement.setSelectionRange(start,end); }
   }
   const dialog = document.createElement("dialog"); dialog.className = "report-modal"; document.body.appendChild(dialog);
   function showDialog(content) {
     dialog.innerHTML=content;
+    observeCharts();
     if (!dialog.open) dialog.showModal();
     else dialog.querySelector("[data-close]")?.focus({preventScroll:true});
   }
@@ -183,7 +200,7 @@
   function openImage(id) {
     const row=byImage.get(id); if(!row) return;
     const c=byCharacter.get(row.character), pictures=c?imagesFor(c):[row], index=pictures.indexOf(row);
-    showDialog(`<div class="modal-head"><h2>${esc(row.display_title)}</h2><button data-close>关闭</button></div>${image(row,true)}<div class="image-detail-nav"><button data-image="${esc(pictures[Math.max(0,index-1)].candidate_id)}" ${index<=0?"disabled":""}>上一张</button><span>${index+1} / ${pictures.length}</span><button data-image="${esc(pictures[Math.min(pictures.length-1,index+1)].candidate_id)}" ${index>=pictures.length-1?"disabled":""}>下一张</button></div><p>${esc(row.character)} · 原始文件 ${esc(row.source_filename)}</p><p class="muted">${row.send_status==="sent"?"已展示":row.send_status==="send_failed"?"发送失败":"未展示"}${c?` · 人物均分 ${score(c.average_score)}`:""}</p>${c?`<button class="text-link" data-detail="${esc(c.character)}">查看人物详情与评分</button>`:""}`);
+    showDialog(`<div class="modal-head"><h2>${esc(row.display_title)}</h2><button data-close>关闭</button></div>${image(row,true)}<div class="image-detail-nav"><button data-image="${esc(pictures[Math.max(0,index-1)].candidate_id)}" ${index<=0?"disabled":""}>上一张</button><span>${index+1} / ${pictures.length}</span><button data-image="${esc(pictures[Math.min(pictures.length-1,index+1)].candidate_id)}" ${index>=pictures.length-1?"disabled":""}>下一张</button></div><p>${esc(row.character)} · 原始文件 ${esc(row.source_filename)}</p>${row.image_quality === "thumbnail" ? '<p class="report-note">此图为节省体积的缩略图；该人物的封面保留高清版本。</p>' : ""}<p class="muted">${row.send_status==="sent"?"已展示":row.send_status==="send_failed"?"发送失败":"未展示"}${c?` · 人物均分 ${score(c.average_score)}`:""}</p>${c?`<button class="text-link" data-detail="${esc(c.character)}">查看人物详情与评分</button>`:""}`);
   }
   function handleClick(event) {
     const detailButton=event.target.closest("[data-detail]");

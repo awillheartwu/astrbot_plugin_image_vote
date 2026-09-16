@@ -127,3 +127,36 @@ class StructuredSummaryProjectionTest(unittest.TestCase):
         self.assertIn('&lt;样本高分&gt;', fallback)
         self.assertIn('观察：仅有一位参与者。', fallback)
         self.assertNotIn('"headline"', fallback)
+
+
+class CompactImageReportTest(unittest.TestCase):
+    fixture = ReportDataTest.fixture
+    def test_compact_covers_and_asset_pool(self):
+        async def run(root):
+            source, candidates, session, votes, _ = self.fixture(root)
+            candidates[0].character = candidates[1].character = 'Alice'
+            candidates[2].character = 'Iris'
+            candidates[0].send_status = SendStatus.SEND_FAILED
+            stats = calculate_statistics(candidates, votes, 1, 10)
+            generator = DirectoryReportGenerator()
+            directory = await generator.generate(session, candidates, stats, source, root/'directory', FakeImageProcessor(), votes=votes)
+            data = json.loads((directory/'data.json').read_text())
+            self.assertEqual([r['image_quality'] for r in data['candidates']], ['thumbnail','main','main'])
+            self.assertFalse((directory/'images/0001.webp').exists())
+            self.assertEqual(len(list((directory/'images').glob('*.webp'))), 5)
+            self.assertEqual(data['candidates'][0]['main_image'], data['candidates'][0]['thumbnail'])
+            single = await generator.generate_single_html(session, candidates, stats, source, root/'single', FakeImageProcessor(), 5, votes=votes)
+            html = (single/'index.html').read_text()
+            inline = json.loads(re.search(r'<script id="report-data" type="application/json">(.*?)</script>',html,re.S).group(1))
+            self.assertEqual(len(inline['image_assets']),2)  # Fake processor writes identical main / thumb bytes.
+            for uri in inline['image_assets'].values():
+                self.assertEqual(html.count(uri),1)
+            for row in inline['candidates']:
+                self.assertIn(row['main_image'],inline['image_assets'])
+                self.assertIn(row['thumbnail'],inline['image_assets'])
+            self.assertNotIn('href="asset:',html)
+            all_images = await DirectoryReportGenerator(image_policy='all').generate(session,candidates,stats,source,root/'all',FakeImageProcessor())
+            self.assertEqual(len(list((all_images/'images').glob('*.webp'))),6)
+            self.assertTrue(all(p.read_bytes()==b'original' for p in source.iterdir()))
+        with tempfile.TemporaryDirectory() as d:
+            asyncio.run(run(Path(d)))

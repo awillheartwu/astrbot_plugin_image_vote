@@ -182,14 +182,7 @@ class WorkspaceAPI:
             payload = json.loads((path/'data.json').read_text())
             if payload.get('report_mode') == 'single_html':
                 return (path/'index.html').read_text()
-            guard = PathGuard(path)
-            for row in payload['candidates']:
-                for key in ('main_image','thumbnail'):
-                    if row.get(key):
-                        row[key] = DirectoryReportGenerator._data_uri(guard.resolve_child(row[key]))
-            for person in payload.get('participants',[]):
-                if person.get('avatar'):
-                    person['avatar'] = DirectoryReportGenerator._data_uri(guard.resolve_child(person['avatar']))
+            DirectoryReportGenerator._embed_assets(payload, path)
             return DirectoryReportGenerator()._render_inline_html(payload)
         return {'html': await asyncio.to_thread(read)}
 

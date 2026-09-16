@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import html
 import json
 import mimetypes
@@ -42,10 +43,13 @@ class ReportGenerationError(RuntimeError):
 
 
 class DirectoryReportGenerator:
-    def __init__(self, asset_root: Optional[Path] = None, image_extension: str = "webp", avatar_service=None):
+    def __init__(self, asset_root: Optional[Path] = None, image_extension: str = "webp", avatar_service=None, image_policy: str = "character_cover"):
         self.asset_root = asset_root or Path(__file__).resolve().parent.parent / "assets"
         self.image_extension = image_extension.lstrip(".").lower()
         self.avatar_service = avatar_service
+        if image_policy not in {"character_cover", "all"}:
+            raise ValueError("invalid report image policy")
+        self.image_policy = image_policy
 
     async def _generate_directory(
         self,
@@ -73,6 +77,12 @@ class DirectoryReportGenerator:
         candidate_list = list(candidates)
         if votes is not None:
             votes = tuple(votes)
+        covers = {}
+        for candidate in candidate_list:
+            name = character_of(candidate)
+            previous = covers.get(name)
+            if previous is None or (previous.send_status.value != "sent" and candidate.send_status.value == "sent"):
+                covers[name] = candidate
         stats_by_id = {item.candidate_id: item for item in statistics.candidates}
         rows: List[Dict[str, object]] = []
         for candidate in candidate_list:
@@ -80,9 +90,14 @@ class DirectoryReportGenerator:
             stem = "%04d" % candidate.display_index
             main_path = images_dir / (stem + "." + self.image_extension)
             thumb_path = images_dir / (stem + "_thumb." + self.image_extension)
+            keep_main = self.image_policy == "all" or covers[character_of(candidate)].id == candidate.id
             try:
                 # A cancelled task must wait for its worker before removing staging files.
-                worker = asyncio.create_task(asyncio.to_thread(image_processor.process, source_path, main_path, thumb_path))
+                thumbnail_only = getattr(image_processor, 'process_thumbnail', None)
+                if not keep_main and callable(thumbnail_only):
+                    worker = asyncio.create_task(asyncio.to_thread(thumbnail_only, source_path, thumb_path))
+                else:
+                    worker = asyncio.create_task(asyncio.to_thread(image_processor.process, source_path, main_path, thumb_path))
                 try:
                     await asyncio.shield(worker)
                 except asyncio.CancelledError:
@@ -90,6 +105,9 @@ class DirectoryReportGenerator:
                     raise
             except Exception as exc:
                 raise ReportGenerationError("failed to process %s: %s" % (candidate.source_filename, exc)) from exc
+            if not keep_main:
+                main_path.unlink(missing_ok=True)
+                main_path = thumb_path
             item = stats_by_id[candidate.id]
             rows.append(
                 {
@@ -99,6 +117,7 @@ class DirectoryReportGenerator:
                     "character": character_of(candidate),
                     "source_filename": candidate.source_filename,
                     "main_image": "images/%s" % main_path.name,
+                    "image_quality": "main" if keep_main else "thumbnail",
                     "thumbnail": "images/%s" % thumb_path.name,
                     "vote_count": item.vote_count,
                     "average_score": item.average_score,
@@ -149,6 +168,7 @@ class DirectoryReportGenerator:
             ],
             "candidates": rows,
             "ai_summary": ai_summary,
+            "image_policy": self.image_policy,
         }
         rows.sort(key=lambda row: (row["rank"] is None, row["rank"] or 0, row["display_index"]))
         payload["candidates"] = rows
@@ -215,12 +235,7 @@ class DirectoryReportGenerator:
             payload = json.loads(data_path.read_text(encoding='utf-8'))
             if max_mb is not None:
                 inline = json.loads(json.dumps(payload))
-                for row in inline['candidates']:
-                    row['main_image'] = self._data_uri(staged / row['main_image'])
-                    row['thumbnail'] = self._data_uri(staged / row['thumbnail'])
-                for person in inline['participants']:
-                    if person.get('avatar'):
-                        person['avatar'] = self._data_uri(staged / person['avatar'])
+                self._embed_assets(inline, staged)
                 inline['report_mode'] = 'single_html'
                 page = self._render_inline_html(inline)
                 if len(page.encode('utf-8')) <= max_mb * 1024 * 1024:
@@ -271,10 +286,28 @@ class DirectoryReportGenerator:
             shutil.rmtree(str(images), ignore_errors=True)
 
     @staticmethod
-    def _data_uri(path: Path) -> str:
-        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        return "data:%s;base64,%s" % (media_type, encoded)
+    def _embed_assets(inline: dict, directory: Path) -> None:
+        guard = PathGuard(directory)
+        # Store each encoded asset once, referenced by short IDs throughout the report.
+        assets, by_digest, by_path = {}, {}, {}
+        def asset_ref(relative):
+            if relative not in by_path:
+                content = guard.resolve_child(relative).read_bytes()
+                digest = hashlib.sha256(content).hexdigest()
+                if digest not in by_digest:
+                    key = 'asset:' + str(len(assets))
+                    media_type = mimetypes.guess_type(relative)[0] or 'application/octet-stream'
+                    assets[key] = 'data:%s;base64,%s' % (media_type, base64.b64encode(content).decode('ascii'))
+                    by_digest[digest] = key
+                by_path[relative] = by_digest[digest]
+            return by_path[relative]
+        for row in inline['candidates']:
+            row['main_image'] = asset_ref(row['main_image'])
+            row['thumbnail'] = asset_ref(row['thumbnail'])
+        for person in inline.get('participants', []):
+            if person.get('avatar'):
+                person['avatar'] = asset_ref(person['avatar'])
+        inline['image_assets'] = assets
 
     def _render_inline_html(self, payload: Dict[str, object]) -> str:
         rendered = self._render_html(payload)
@@ -352,6 +385,9 @@ class DirectoryReportGenerator:
                     html.escape(str(row["source_filename"])),
                 )
             )
+        if payload.get('image_assets'):
+            cards = [re.sub(r'<a href="[^"]*"><img[^>]*></a>',
+                            '<p class="muted">启用 JavaScript 后可浏览内嵌图片。</p>', card) for card in cards]
         summary = summary_text(payload.get("ai_summary")) or "未启用 AI 总结，以上为纯统计结果。"
         embedded = json.dumps(payload, ensure_ascii=False).replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
         return """<!doctype html>

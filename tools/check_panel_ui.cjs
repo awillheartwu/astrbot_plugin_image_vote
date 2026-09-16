@@ -55,10 +55,11 @@ const scenarios = {
 function bridgeScript() {
   return ({ payload }) => {
     const respond = (value) => Promise.resolve({ status: 'ok', data: value });
+    window.__downloads = [];
     window.AstrBotPluginPage = {
       ready: () => Promise.resolve({ isDark: payload.theme === "dark" }),
       onContext: () => {},
-      download: () => {},
+      download: (endpoint,params) => { window.__downloads.push({endpoint,params}); },
       apiGet: (endpoint, params = {}) => {
         if (payload.fail) return Promise.reject(new Error('连接中断'));
         if (endpoint === 'projects') return respond(payload.projects);
@@ -121,6 +122,26 @@ function bridgeScript() {
             name + ' ' + width + 'px ' + page + ' 横向溢出 ' + overflow.scrollWidth + ' > ' + overflow.innerWidth + '（' + overflow.offenders.join(', ') + '）',
           );
           if (shotsDir) await tab.screenshot({ path: path.join(shotsDir, theme + '-' + name + '-' + page + '-' + width + '.png'), fullPage: true });
+          if(name==='rich' && page==='projects') {
+            assert.equal(await tab.locator('.project-card').count(),3);
+            await tab.locator('#project-search').fill('帝国');
+            assert.equal(await tab.locator('.project-card').count(),1);
+            await tab.locator('.project-location summary').click();
+            assert.match(await tab.locator('.project-path').innerText(),/AstrBot/);
+            await tab.locator('[data-action="edit"] .control-icon').click();
+            assert.equal(await tab.locator('#project-form [name="name"]').inputValue(),'帝国编年史015');
+            await tab.locator('#modal .modal-head [data-action="close"]').click();
+            await tab.locator('[data-action="unregister"]').click();
+            assert.match(await tab.locator('#modal').innerText(),/不删除原始图片/);
+            await tab.locator('#modal .modal-head [data-action="close"]').click();
+          }
+          if(name==='rich' && page==='history') {
+            await tab.locator('[data-action="download"] .control-icon').first().click();
+            assert.equal(await tab.evaluate(()=>window.__downloads[0].endpoint),'reports/download');
+            await tab.locator('[data-action="cleanup"]').first().click();
+            assert.equal(await tab.locator('#modal').evaluate(el=>el.open),true);
+            await tab.locator('#modal .modal-head [data-action="close"]').click();
+          }
           checked.push(theme + '/' + name + '/' + page + '/' + width);
           await context.close();
         }

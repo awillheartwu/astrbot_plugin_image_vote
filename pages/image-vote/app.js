@@ -110,6 +110,26 @@
       )
       .join("")}</nav>`;
   }
+  // Small inline control icons, no network assets or new runtime dependency.
+  const controlPaths = {
+    refresh:'M20 7v5h-5 M4 17v-5h5 M6 7a7 7 0 0 1 12-1l2 3 M4 15l2 3a7 7 0 0 0 12-1',
+    add:'M12 5v14 M5 12h14',
+    play:'M8 5l11 7-11 7Z',
+    edit:'m14 5 5 5 M4 20l4-1L20 7l-4-4L4 15Z',
+    download:'M12 3v12 m-5-5 5 5 5-5 M5 16v5h14v-5',
+    filter:'M4 6h16 M7 12h10 M10 18h4',
+    save:'M5 3h12l4 4v14H3V3Z M7 3v6h10V3 M7 21v-7h10v7',
+  };
+  function decorateControls() {
+    const names={refresh:'refresh',register:'add',start:'play',preflight:'play',edit:'edit',download:'download','filter-history':'filter',export:'refresh','save-config':'save'};
+    document.querySelectorAll('button[data-action]').forEach(button=>{
+      const name=names[button.dataset.action];
+      if(!name || button.querySelector('.control-icon')) return;
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+      svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');svg.classList.add('control-icon');
+      const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',controlPaths[name]);svg.append(path);button.prepend(svg);
+    });
+  }
   function frame(body) {
     return `<div class="page-heading"><div><div class="eyebrow">IMAGE VOTE / WORKSPACE</div><h1 class="admin-title">${titles[page][0]}</h1><p>${titles[page][1]}</p></div><div class="actions" style="margin:0"><button data-action="refresh">刷新</button>${page === "run" ? '<button class="primary" data-action="start">开始投票</button>' : page === "projects" ? '<button class="primary" data-action="register">登记项目</button>' : ""}</div></div>${nav()}${!connected ? '<p class="error-banner">无法确认最新状态，请刷新连接后操作。未保存的配置草稿仍然保留。</p>' : ""}${body}`;
   }
@@ -126,13 +146,14 @@
     $("#app").innerHTML = frame(body);
     if (busy) $("#app").classList.add("loading");
     else $("#app").classList.remove("loading");
+    decorateControls();
     loadThumbnails();
   }
   function runPage() {
     return `<div class="admin-stats"><span><b>${active.length}</b>场进行中</span><span><b>${projects.length}</b>个项目</span></div>${active.length ? active.map((r) => `<section class="run-grid"><div class="surface"><div class="label-row"><div><h2>${esc(r.project_name)}</h2><p class="subtle">群 ${esc(r.group_id)} · ${esc(r.short_id)}</p></div><span class="badge">${status[r.status] || esc(r.status)}</span></div>${r.active_candidate ? `<img class="run-image" data-thumb-session="${esc(r.id)}" data-thumb-candidate="${esc(r.active_candidate.id)}" alt="${esc(r.active_candidate.name)}">` : '<p class="muted">尚未成功发送图片</p>'}<div class="label-row"><b>${esc(r.active_character || "等待人物首图")}</b><span>${r.sent_count} / ${r.candidate_count} 张已发送</span></div><div class="progress"><i style="width:${r.candidate_count ? (r.sent_count / r.candidate_count) * 100 : 0}%"></i></div><p class="subtle">${r.vote_count} 张人物票 · ${r.participant_count} 人参与${r.seconds_until_next != null ? " · 下一人物约 " + Math.ceil(r.seconds_until_next) + " 秒" : ""}</p>${r.error_message ? `<p class="state-details">${esc(r.error_message)}</p>` : ""}<div class="actions">${["RUNNING", "PAUSED"].includes(r.status) ? `<button class="primary" data-control="${r.status === "PAUSED" ? "resume" : "pause"}" data-id="${esc(r.id)}">${r.status === "PAUSED" ? "继续" : "暂停"}</button><button data-control="finish" data-id="${esc(r.id)}">提前结束</button><button class="quiet danger" data-control="stop" data-id="${esc(r.id)}">取消本轮</button>` : '<span class="muted">正在收尾，请稍候</span>'}</div></div><aside class="surface"><h3>本轮参数</h3><div class="kv"><span>人物数</span><b>${r.character_count}</b><span>评分范围</span><b>${r.score_min}–${r.score_max}</b><span>人物间隔</span><b>${r.interval_seconds} 秒</b><span>最终等待</span><b>${r.final_grace_seconds} 秒</b><span>报告状态</span><b>${reportStatus[r.report_state]}</b></div><div class="notice">同一个人物就是一个投票窗口：该人物全部图片发完后，等待完整间隔再开始下一个人物。</div></aside></section>`).join("") : '<section class="surface empty"><h2>现在没有进行中的投票</h2><p>选择一个项目，预检后开始下一场。</p><button class="primary" data-action="start">选择项目</button></section>'}`;
   }
   function projectsPage() {
-    return `<div class="toolbar"><input id="project-search" type="search" aria-label="搜索项目名称" placeholder="搜索项目名称" value="${esc(projectSearch)}"></div><div id="project-list" class="project-grid">${projectCards()}</div>`;
+    return `<div class="toolbar project-toolbar"><input id="project-search" type="search" aria-label="搜索项目名称" placeholder="搜索项目名称" value="${esc(projectSearch)}"><span class="count">${projects.length} 个项目</span></div><div id="project-list" class="project-grid">${projectCards()}</div>`;
   }
   function projectCards() {
     return (
@@ -142,14 +163,14 @@
         )
         .map(
           (p) =>
-            `<article class="surface"><div class="label-row"><h2>${esc(p.name)}</h2><span class="badge neutral">${p.source === "registered" ? "登记项目" : "目录项目"}</span></div><p class="muted">${esc(p.settings.description || "尚未填写项目说明")}</p><p class="project-path">${esc(p.path)}</p>${p.error ? `<p class="error">${esc(p.error)}</p>` : `<div class="project-thumbs"><img data-thumb-project="${esc(p.name)}" alt="项目图片预览"></div>`}<div class="actions"><button class="primary" data-project="${esc(p.name)}" data-action="preflight">预检与开始</button><button data-project="${esc(p.name)}" data-action="edit">${p.source === "registered" ? "编辑" : "登记设置"}</button>${p.source === "registered" ? `<button class="quiet danger" data-project="${esc(p.name)}" data-action="unregister">取消登记</button>` : ""}</div></article>`,
+            `<article class="surface project-card"><div class="project-media ${p.error ? "is-empty" : ""}"><span class="cover-fallback">${p.error ? "暂无预览" : "正在读取封面"}</span>${p.error ? "" : `<img data-thumb-project="${esc(p.name)}" alt="${esc(p.name)} 项目封面">`}<span class="project-source">${p.source === "registered" ? "已登记" : "目录项目"}</span></div><div class="project-content"><h2>${esc(p.name)}</h2><p class="project-description ${p.settings.description ? "" : "is-muted"}">${esc(p.settings.description || "添加项目说明，方便下次找到它。")}</p><details class="project-location"><summary>项目目录</summary><p class="project-path">${esc(p.path)}</p></details>${p.error ? `<p class="error">${esc(p.error)}</p>` : ""}<div class="project-options"><span>${p.settings.interval_seconds ? esc(p.settings.interval_seconds) + " 秒间隔" : "默认间隔"}</span><span>${p.settings.recursive == null ? "默认扫描" : p.settings.recursive ? "含子目录" : "当前目录"}</span></div><div class="actions project-actions"><button class="primary" data-project="${esc(p.name)}" data-action="preflight">预检与开始</button><button data-project="${esc(p.name)}" data-action="edit">${p.source === "registered" ? "编辑" : "登记设置"}</button>${p.source === "registered" ? `<button class="quiet danger" data-project="${esc(p.name)}" data-action="unregister">取消登记</button>` : ""}</div></div></article>`,
         )
         .join("") ||
       '<div class="empty">还没有项目。请登记一个容器内图片目录。</div>'
     );
   }
   function historyPage() {
-    return `<div class="toolbar"><input id="group-filter" placeholder="按群号筛选" aria-label="按群号筛选" value="${esc(groupFilter)}"><button data-action="filter-history">筛选</button></div><div class="table-wrap"><table><thead><tr><th>项目 / 场次</th><th>群</th><th>投票</th><th>报告</th><th>操作</th></tr></thead><tbody>${sessions.map((r) => `<tr><td><b>${esc(r.project_name)}</b><br><small>${esc(formatTime(r.created_at))} · ${esc(r.short_id)}<br>${r.vote_count} 票 · ${r.sent_count}/${r.candidate_count} 张已发送</small></td><td>${esc(r.group_id)}</td><td>${status[r.status] || esc(r.status)}</td><td><span class="badge neutral">${reportStatus[r.report_state]}</span>${r.report_error ? `<p class="error">${esc(r.report_error)}</p>` : ""}</td><td><div class="history-tools">${r.report_available || r.report_state === "ready" ? `<button data-action="download" data-id="${esc(r.id)}">下载</button><button class="danger" data-action="cleanup" data-id="${esc(r.id)}">清理</button>` : ""}${["COMPLETED", "CANCELLED"].includes(r.status) && r.report_state !== "generating" ? `<button data-action="export" data-id="${esc(r.id)}">${r.report_state === "ready" ? "重新生成" : "生成报告"}</button>` : ""}${["COMPLETED", "CANCELLED", "FAILED"].includes(r.status) ? `<button class="danger" data-action="purge" data-id="${esc(r.id)}">彻底删除</button>` : ""}</div></td></tr>`).join("")}</tbody></table>${sessions.length ? "" : '<div class="empty">没有符合条件的历史记录</div>'}</div><div id="pagination"><button data-action="previous" ${offset === 0 ? "disabled" : ""}>上一页</button><span class="subtle">共 ${total} 场 · 第 ${Math.floor(offset / 30) + 1} 页</span><button data-action="next" ${offset + 30 >= total ? "disabled" : ""}>下一页</button></div>`;
+    return `<div class="toolbar history-filter"><input id="group-filter" placeholder="按群号筛选" aria-label="按群号筛选" value="${esc(groupFilter)}"><button data-action="filter-history">筛选</button></div><div class="table-wrap"><table><thead><tr><th>项目 / 场次</th><th>群</th><th>投票</th><th>报告</th><th>操作</th></tr></thead><tbody>${sessions.map((r) => `<tr><td><b>${esc(r.project_name)}</b><br><small>${esc(formatTime(r.created_at))} · ${esc(r.short_id)}<br>${r.vote_count} 票 · ${r.sent_count}/${r.candidate_count} 张已发送</small></td><td>${esc(r.group_id)}</td><td><span class="status-label status-${esc(r.status.toLowerCase())}">${status[r.status] || esc(r.status)}</span></td><td><span class="badge neutral">${reportStatus[r.report_state]}</span>${r.report_error ? `<p class="error">${esc(r.report_error)}</p>` : ""}</td><td><div class="history-tools">${r.report_available || r.report_state === "ready" ? `<button class="download-action" data-action="download" data-id="${esc(r.id)}">下载</button><button class="quiet danger" data-action="cleanup" data-id="${esc(r.id)}">清理</button>` : ""}${["COMPLETED", "CANCELLED"].includes(r.status) && r.report_state !== "generating" ? `<button data-action="export" data-id="${esc(r.id)}">${r.report_state === "ready" ? "重新生成" : "生成报告"}</button>` : ""}${["COMPLETED", "CANCELLED", "FAILED"].includes(r.status) ? `<button class="quiet danger" data-action="purge" data-id="${esc(r.id)}">彻底删除</button>` : ""}</div></td></tr>`).join("")}</tbody></table>${sessions.length ? "" : '<div class="empty">没有符合条件的历史记录</div>'}</div><div id="pagination"><button data-action="previous" ${offset === 0 ? "disabled" : ""}>上一页</button><span class="subtle">共 ${total} 场 · 第 ${Math.floor(offset / 30) + 1} 页</span><button data-action="next" ${offset + 30 >= total ? "disabled" : ""}>下一页</button></div>`;
   }
   const categories = [
     ["voting", "投票规则"],
@@ -252,6 +273,7 @@
     if (!el.open) dialogOrigin = document.activeElement;
     el.className = cls;
     el.innerHTML = `<div class="modal-head"><h2 id="modal-title">${esc(title)}</h2><button data-action="close">关闭</button></div>${html}`;
+    decorateControls();
     if (!el.open) el.showModal();
   }
   function close() {
@@ -290,6 +312,7 @@
         "预检 · " + name,
         `<div class="facts"><span><b>${p.character_count}</b>个人物</span><span><b>${p.count}</b>张图片</span><span><b>${(p.total_size / 1024 / 1024).toFixed(1)}</b>MB</span><span><b>${Math.ceil(p.estimated_seconds / 60)}</b>分钟</span></div><p class="subtle">人物按首次出现排序，组内保持原顺序 · 评分 ${p.score_min}–${p.score_max} · 人物间隔 ${p.interval_seconds}秒（${p.interval_source === "project" ? "项目设置" : "全局默认"}）</p><div class="project-thumbs">${p.first.map((c, i) => `<img data-thumb-project="${esc(name)}" data-thumb-index="${i + 1}" alt="${esc(c.display_title)}">`).join("")}</div><details><summary>扫描明细</summary><p>首批：${p.first.map((c) => esc(c.source_filename)).join("、")}</p><p>末批：${p.last.map(esc).join("、")}</p><p>非图片文件：${p.invalid_files.map(esc).join("、") || "无"}</p><p>${p.warnings.map(esc).join("；")}</p></details>${!p.output_writable ? '<p class="error">输出目录不可写，请先调整路径设置。</p>' : ""}<label>目标群<select id="start-group">${g.map((x) => `<option value="${esc(x.umo)}">${esc(x.name)} · ${esc(x.id)} · ${esc(x.platform)}</option>`).join("")}</select></label>${!g.length ? '<p class="error">没有可用群，请检查 OneBot 连接与群白名单。</p>' : ""}<p id="start-error" class="error" role="alert"></p><div class="actions"><button data-action="close">返回</button><button class="primary" data-action="confirm-start" ${!g.length || !p.count || !p.output_writable ? "disabled" : ""}>开始向选定群发送图片</button></div>`,
       );
+      decorateControls();
       loadThumbnails();
     } catch (e) {
       modal("预检失败", `<p class="error">${esc(e.message)}</p>`);
@@ -335,11 +358,18 @@
           if (thumbCache.size > 60) thumbCache.clear();
           thumbCache.set(key, value);
         }
-        if (el.isConnected) el.src = value.image;
+        if (el.isConnected) {
+          el.onload = () => el.parentElement.classList.add("cover-loaded");
+          el.onerror = () => { el.style.display="none"; const label=el.parentElement.querySelector(".cover-fallback"); if(label) label.textContent="图片暂不可用"; };
+          el.src = value.image;
+        }
       } catch (e) {
         if (el.isConnected) {
           el.removeAttribute("src");
           el.alt = "图片暂不可用";
+          el.style.display = "none";
+          const label=el.parentElement.querySelector(".cover-fallback");
+          if(label) label.textContent="图片暂不可用";
         }
       }
     }
@@ -560,6 +590,7 @@
     if (e.target.id === "project-search") {
       projectSearch = e.target.value;
       $("#project-list").innerHTML = projectCards();
+      decorateControls();
       loadThumbnails();
     }
     if (e.target.id === "config-search") {

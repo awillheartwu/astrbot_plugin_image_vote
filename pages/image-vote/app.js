@@ -149,7 +149,7 @@
     );
   }
   function historyPage() {
-    return `<div class="toolbar"><input id="group-filter" placeholder="按群号筛选" aria-label="按群号筛选" value="${esc(groupFilter)}"><button data-action="filter-history">筛选</button></div><div class="table-wrap"><table><thead><tr><th>项目 / 场次</th><th>群</th><th>投票</th><th>报告</th><th>操作</th></tr></thead><tbody>${sessions.map((r) => `<tr><td><b>${esc(r.project_name)}</b><br><small>${esc(formatTime(r.created_at))} · ${esc(r.short_id)}<br>${r.vote_count} 票 · ${r.sent_count}/${r.candidate_count} 张已发送</small></td><td>${esc(r.group_id)}</td><td>${status[r.status] || esc(r.status)}</td><td><span class="badge neutral">${reportStatus[r.report_state]}</span>${r.report_error ? `<p class="error">${esc(r.report_error)}</p>` : ""}</td><td><div class="history-tools">${r.report_available || r.report_state === "ready" ? `<button data-action="preview-report" data-id="${esc(r.id)}">预览</button><button data-action="download" data-id="${esc(r.id)}">下载</button><button class="danger" data-action="cleanup" data-id="${esc(r.id)}">清理</button>` : ""}${["COMPLETED", "CANCELLED"].includes(r.status) && r.report_state !== "generating" ? `<button data-action="export" data-id="${esc(r.id)}">${r.report_state === "ready" ? "重新生成" : "生成报告"}</button>` : ""}${["COMPLETED", "CANCELLED", "FAILED"].includes(r.status) ? `<button class="danger" data-action="purge" data-id="${esc(r.id)}">彻底删除</button>` : ""}</div></td></tr>`).join("")}</tbody></table>${sessions.length ? "" : '<div class="empty">没有符合条件的历史记录</div>'}</div><div id="pagination"><button data-action="previous" ${offset === 0 ? "disabled" : ""}>上一页</button><span class="subtle">共 ${total} 场 · 第 ${Math.floor(offset / 30) + 1} 页</span><button data-action="next" ${offset + 30 >= total ? "disabled" : ""}>下一页</button></div>`;
+    return `<div class="toolbar"><input id="group-filter" placeholder="按群号筛选" aria-label="按群号筛选" value="${esc(groupFilter)}"><button data-action="filter-history">筛选</button></div><div class="table-wrap"><table><thead><tr><th>项目 / 场次</th><th>群</th><th>投票</th><th>报告</th><th>操作</th></tr></thead><tbody>${sessions.map((r) => `<tr><td><b>${esc(r.project_name)}</b><br><small>${esc(formatTime(r.created_at))} · ${esc(r.short_id)}<br>${r.vote_count} 票 · ${r.sent_count}/${r.candidate_count} 张已发送</small></td><td>${esc(r.group_id)}</td><td>${status[r.status] || esc(r.status)}</td><td><span class="badge neutral">${reportStatus[r.report_state]}</span>${r.report_error ? `<p class="error">${esc(r.report_error)}</p>` : ""}</td><td><div class="history-tools">${r.report_available || r.report_state === "ready" ? `<button data-action="download" data-id="${esc(r.id)}">下载</button><button class="danger" data-action="cleanup" data-id="${esc(r.id)}">清理</button>` : ""}${["COMPLETED", "CANCELLED"].includes(r.status) && r.report_state !== "generating" ? `<button data-action="export" data-id="${esc(r.id)}">${r.report_state === "ready" ? "重新生成" : "生成报告"}</button>` : ""}${["COMPLETED", "CANCELLED", "FAILED"].includes(r.status) ? `<button class="danger" data-action="purge" data-id="${esc(r.id)}">彻底删除</button>` : ""}</div></td></tr>`).join("")}</tbody></table>${sessions.length ? "" : '<div class="empty">没有符合条件的历史记录</div>'}</div><div id="pagination"><button data-action="previous" ${offset === 0 ? "disabled" : ""}>上一页</button><span class="subtle">共 ${total} 场 · 第 ${Math.floor(offset / 30) + 1} 页</span><button data-action="next" ${offset + 30 >= total ? "disabled" : ""}>下一页</button></div>`;
   }
   const categories = [
     ["voting", "投票规则"],
@@ -507,20 +507,6 @@
           await bridge.download("reports/download", {
             session_id: b.dataset.id,
           });
-          break;
-        case "preview-report":
-          modal("正在读取报告", "<p>生成离线预览…</p>", "preview");
-          {
-            const result = await get("reports/preview", {
-              session_id: b.dataset.id,
-            });
-            modal(
-              "报告预览",
-              '<iframe class="report-frame" title="投票报告预览" sandbox="allow-scripts"></iframe>',
-              "preview",
-            );
-            $(".report-frame").srcdoc = result.html;
-          }
           break;
         case "filter-history":
           groupFilter = $("#group-filter").value.trim();

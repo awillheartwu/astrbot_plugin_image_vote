@@ -76,8 +76,7 @@ def check(source):
             payload=json.loads(archive.read('data.json'))
             assert payload['participants'][0]['name']=='验收参与者'
             assert payload['statistics']['total_valid_votes']==1
-        assert '<script id="report-data"' in get('reports/preview',session_id=first)['html']
-        checked.append('real report generation, streamed ZIP contents, embedded preview, participant projection')
+        checked.append('real report generation, streamed ZIP contents, participant projection')
         current=get('config')
         post('config',{'revision':current['revision'],'values':{'report_mode':'single_html','score_max':10,'report_include_participants':False}})
         post('reports/export',{'session_id':first})

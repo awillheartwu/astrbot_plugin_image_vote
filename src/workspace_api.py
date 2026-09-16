@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .path_guard import PathGuard
-from .report_generator import PLUGIN_NAME, REPORT_MARKER, DirectoryReportGenerator
+from .report_generator import PLUGIN_NAME, REPORT_MARKER
 from .workspace_service import ConfigConflict, WorkspaceService
 
 
@@ -43,7 +43,7 @@ class WorkspaceAPI:
                                  ('groups','GET'),('providers','GET'),('sessions','GET'),('sessions/start','POST'),
                                  ('sessions/control','POST'),('reports/export','POST'),('reports/cleanup','POST'),
                                  ('sessions/purge','POST'),
-                                 ('reports/download','GET'),('reports/preview','GET'),('thumbnail','GET'),('prompt/preview','POST')]:
+                                 ('reports/download','GET'),('thumbnail','GET'),('prompt/preview','POST')]:
             async def handler(_endpoint=endpoint, _method=method):
                 try:
                     self.authorize()
@@ -117,12 +117,12 @@ class WorkspaceAPI:
                 # 生成与读取的互斥由应用层守卫裁决，群命令走同一条路径。
                 result = self.plugin.application.cleanup_reports(session_id)
             return {'removed': result.removed, 'skipped': result.skipped}
-        if endpoint in {'reports/download','reports/preview'}:
+        if endpoint == 'reports/download':
             session_id = query.get('session_id','')
             # 读取期间禁止清理删除目录；单文件下载还会先打开文件句柄。
             with service.reading(session_id):
                 path = await service.report_directory(session_id)
-                return await (self.download(path) if endpoint.endswith('download') else self.preview_report(path))
+                return await self.download(path)
         if endpoint == 'sessions/purge':
             if body.get('confirmed') is not True:
                 raise ValueError('彻底删除需要确认')
@@ -173,18 +173,6 @@ class WorkspaceAPI:
                 image.save(buffer,'WEBP',quality=72)
                 return 'data:image/webp;base64,'+base64.b64encode(buffer.getvalue()).decode()
         return {'image': await asyncio.to_thread(read)}
-
-    async def preview_report(self, path):
-        def read():
-            # Previews use a bounded inline document; full reports always remain downloadable.
-            if sum(p.stat().st_size for p in path.rglob('*') if p.is_file() and not p.is_symlink()) > 64 * 1024 * 1024:
-                raise ValueError('报告较大，请下载完整报告后打开')
-            payload = json.loads((path/'data.json').read_text())
-            if payload.get('report_mode') == 'single_html':
-                return (path/'index.html').read_text()
-            DirectoryReportGenerator._embed_assets(payload, path)
-            return DirectoryReportGenerator()._render_inline_html(payload)
-        return {'html': await asyncio.to_thread(read)}
 
     async def download(self, path):
         payload = json.loads((path/'data.json').read_text())

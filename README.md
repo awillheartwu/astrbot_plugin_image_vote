@@ -98,6 +98,18 @@ volumes:
 
 页面无外部 CDN 依赖，可以 `file://` 直接打开。概览按人物排名，「全部图片」把同一人物的所有图片放在同一分组，「按参与者查看」展示每位参与者对各人物保留的最终一票。图片仅作为人物来源与浏览素材，不再单独排名。清理只删除带本插件 marker 的目录，不会触碰 `input_root`。
 
+## 磁盘占用与清理
+
+插件只往两处写东西，方便整体备份或清理：
+
+| 位置 | 内容 | 清理方式 |
+| --- | --- | --- |
+| `data/plugin_data/astrbot_plugin_image_vote/` | `vote.db`（会话、图片、票）、`projects.json`（项目登记表）、`avatar_cache/`（报告头像缓存，128px WebP） | 数据库可整体删除重来；头像缓存按 `avatar_cache_retention_days`（默认 30 天）在启动时自动清理 |
+| `output_root`（默认 `./data/reports`） | 各场次的报告目录，以及生成期间临时出现的 `.image-vote-*` staging 目录 | 报告按 `report_retention_days`（默认 30 天）自动清理，可用 `/vote cleanup` 手动清理；staging 目录在启动时清理超过一天的残留 |
+
+生成单文件报告时的下载打包会用到系统临时目录（`image-vote-download-*`），同样在启动时按一天清理。
+
+实测规模参考：45 张 224 MB 的项目，目录版报告约 4 MB、单文件版约 16 MB；插件数据目录本身不到 1 MB（含头像缓存）。默认配置下报告保留 30 天后自动删除，投票记录保留，需要时可用 `/vote export` 重新生成报告。
 ## 开发
 
 ```bash

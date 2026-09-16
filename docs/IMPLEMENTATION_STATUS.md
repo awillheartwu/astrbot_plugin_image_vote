@@ -1,13 +1,13 @@
 # 实现与验收状态
 
-> 更新时间：2026-09-16。版本基线：**0.13.11**。本文件是「当前实现到哪、验收到哪」的出处；逐版本变更见 [CHANGELOG.md](../CHANGELOG.md)，需求基线见 [REQUIREMENTS.md](REQUIREMENTS.md)，历史差距表见 [ROADMAP.md](ROADMAP.md)。
+> 更新时间：2026-09-16。版本基线：**0.13.12**。本文件是「当前实现到哪、验收到哪」的出处；逐版本变更见 [CHANGELOG.md](../CHANGELOG.md)，需求基线见 [REQUIREMENTS.md](REQUIREMENTS.md)，历史差距表见 [ROADMAP.md](ROADMAP.md)。
 
 ## 一、结论
 
 插件在真机（AstrBot 4.28.0 + NapCat）上已完成多场完整投票：发送、计票、统计、报告与清理的主单位都是**人物**，同一人物多图连续或合并发送，每人每人物只保留一张最终票。
 
-- 本地 **140 项单元测试**通过（1 项图片用例因本机解释器缺 Pillow 跳过）。
-- 报告页与插件面板各有可复跑的浏览器检查：`tools/check_report_ui.cjs`（DOM 与交互）、`tools/check_panel_ui.cjs`（390/768/1440 × 四页 × 正常/空态/断连，共 27 组）。
+- 本地 **140 项单元测试**全部通过（带 Pillow 的 Python 3.12 环境，无跳过）。
+- 报告页与插件面板各有可复跑的浏览器检查：`tools/check_report_ui.cjs`（DOM 与交互）、`tools/check_panel_ui.cjs`（390/768/1440 × 四页 × 正常/空态/断连，明暗主题共 54 组）。
 - 真机已完成：45 张 / 17 人物 / 46 票完整场次；合并发送拆条；自动暂停与恢复；彻底删除；报告导出与下载。
 
 ## 二、当前能力
@@ -41,14 +41,14 @@
 
 | 方式 | 命令 | 最近结果（2026-09-16） |
 | --- | --- | --- |
-| 单元测试 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .` | 140 项通过，1 项跳过（本机无 Pillow） |
+| 单元测试 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .` | 140 项通过，无跳过 |
 | 报告页检查 | `NODE_PATH=<playwright> node tools/check_report_ui.cjs` | PASS：排名、零分、转义、展开、搜索焦点、弹窗、来源、排序、主题、隐私与空态 |
-| 面板检查 | `NODE_PATH=<playwright> node tools/check_panel_ui.cjs [--shots <dir>]` | PASS：27 组页面无横向溢出、无脚本错误 |
-| 隔离 HTTP 验收 | `python tools/check_workspace.py --astrbot-source <AstrBot 检出>` | 6 组断言通过（历史记录，0.12.0 时期） |
+| 面板检查 | `NODE_PATH=<playwright> node tools/check_panel_ui.cjs [--shots <dir>]` | PASS：明暗主题 54 组页面无横向溢出、无脚本错误 |
+| 隔离 HTTP 验收 | `python tools/check_workspace.py --astrbot-source <AstrBot 检出>` | 0.13.12 重新运行 6 组断言通过；真实 SQLite/Pillow，群发送与模型为替身 |
 | 大图处理 | `python tools/check_large_report.py` | 7 张 5000×5000 PNG，原图 SHA-256 未变（历史记录） |
 | 真机场次 | NAS 实例（AstrBot 4.28.0 + NapCat） | 45 张 / 17 人物 / 46 票；报告生成、下载与重新导出均正常 |
 
-两个浏览器检查都需要 Playwright：本机可 `npm install --prefix /tmp/pwcheck playwright-core` 后用 `NODE_PATH=/tmp/pwcheck/node_modules` 运行（脚本使用系统 Chrome，不下载浏览器）。
+两个浏览器检查都需要 Playwright：本机可 `npm install --prefix /tmp/pwcheck playwright` 后用 `NODE_PATH=/tmp/pwcheck/node_modules` 运行（脚本使用系统 Chrome，不下载浏览器）。
 
 ## 四、尚未验收
 
@@ -69,7 +69,7 @@
 | 单文件超限回退通知 | 写日志与报告页说明，不回群消息 |
 | 项目内 `project.json` 的 `name` / `sort_mode` | 未实现；支持 `files` 顺序与 `characters` 映射 |
 | 扫描忽略报告输出目录 | 未实现；`output_root` 放在项目目录内时会被扫到 |
-| 报告重新导出 | 一次只能导出一场；旧报告是静态快照，新样式不会自动回溯 |
+| 报告重新导出 | 同一场次同一时间只允许一次导出；旧报告是静态快照，新样式不会自动回溯 |
 
 ## 六、历史修复记录（0.12.x–0.13.x）
 

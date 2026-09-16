@@ -151,3 +151,9 @@ NODE_PATH=/tmp/pwcheck/node_modules node tools/check_panel_ui.cjs --shots /tmp/p
 单文件报告与管理页下载共用同一份资源池，相同图片内容只内嵌一次，页面多处复用；Base64 本身约增加三分之一体积。单文件报告禁用 JavaScript 时保留统计文本，浏览内嵌图片需启用 JavaScript。目录报告继续用文件路径复用图片。
 
 三张本地示例插画的实测主图约 190–211 KB、缩略图约 25–30 KB；两个人物三张图的单文件示例由 1.88 MB 降至 0.73 MB。按这些样本估算，100 张不同图片、20 个人物，精简单文件的图片载荷约 8.9 MB，另加页面、统计与头像；实际照片 / 截图复杂度不同，需用真实项目重导出确认。
+
+## 开发与发布
+
+代码按 MIT 许可证发布。日常开发使用 `dev`，正式发布使用 `main` 与版本标签；两个仓库分别推送并核对提交。开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，发布与回退见 [docs/RELEASE.md](docs/RELEASE.md)（开发文档保留在源码仓库，发布归档不包含）。
+
+市场仓库地址：`https://github.com/awillheartwu/astrbot_plugin_image_vote`。首次配置请设置容器可访问的图片输入目录与可写的报告输出目录；管理页须从已登录的 AstrBot Plugin Pages 打开。

@@ -90,7 +90,7 @@ def check(source):
         assert saved['voting']['score_max']==10
         checked.append('persistent config write, single HTML export, share privacy, historic score snapshot')
         post('reports/cleanup',{'session_id':first,'confirmed':True})
-        assert next(r for r in get('sessions')['sessions'] if r['id']==first)['report_state']=='missing'
+        assert next(r for r in get('sessions')['sessions'] if r['id']==first)['report_state']=='cleaned'
         assert len(list(Path(project['path']).glob('*.png')))==3
         post('reports/export',{'session_id':first})
         wait_for(lambda: next(r for r in get('sessions')['sessions'] if r['id']==first)['report_state']=='ready')

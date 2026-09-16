@@ -148,6 +148,15 @@ const data = {
   assert.equal(await page.locator('.coverage-panel .ring-chart strong').innerText(),'—');
   await page.locator('[data-page="people"]').click();
   assert.match(await page.locator('#person-detail').innerText(),/暂无参与者明细/);
+  for(const theme of ['light','dark']) for(const width of [390,768,1440]) {
+    await page.setViewportSize({width,height:1000});
+    await mount(data);await page.locator('html').evaluate((el,t)=>el.dataset.theme=t,theme);
+    for(const view of ['overview','images','people']) {
+      await page.locator(`[data-page="${view}"]`).click();
+      assert.equal(await page.locator('[aria-current="page"]').getAttribute('data-page'),view);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${theme}/${width}/${view} overflow`);
+    }
+  }
   assert.deepEqual(errors,[]);
   console.log('PASS: ranking, zero scores, escaped names, expansion, live search focus, dialog, source attribution, sorting, theme, privacy and empty states. No visual acceptance performed.');
  }finally{await browser.close();}

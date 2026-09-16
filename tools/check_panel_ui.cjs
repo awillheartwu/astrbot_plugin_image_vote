@@ -52,11 +52,11 @@ const scenarios = {
   offline: { fail: true },
 };
 
-function bridgeScript(data) {
+function bridgeScript() {
   return ({ payload }) => {
     const respond = (value) => Promise.resolve({ status: 'ok', data: value });
     window.AstrBotPluginPage = {
-      ready: () => Promise.resolve({ isDark: false }),
+      ready: () => Promise.resolve({ isDark: payload.theme === "dark" }),
       onContext: () => {},
       download: () => {},
       apiGet: (endpoint, params = {}) => {
@@ -79,15 +79,16 @@ function bridgeScript(data) {
   const errors = [];
   const checked = [];
   try {
+    for (const theme of ['light', 'dark']) {
     for (const [name, scenario] of Object.entries(scenarios)) {
-      const payload = { values, schema, svg, ...scenario };
+      const payload = { values, schema, svg, theme, ...scenario };
       for (const width of [390, 768, 1440]) {
         for (const page of ['run', 'projects', 'history', 'settings']) {
           if (name === 'offline' && page !== 'run') continue;
           const context = await browser.newContext({ viewport: { width, height: 900 } });
           const tab = await context.newPage();
           tab.on('pageerror', (e) => errors.push(name + '/' + width + '/' + page + ': ' + e.message));
-          await tab.addInitScript(bridgeScript(payload), { payload });
+          await tab.addInitScript(bridgeScript(), { payload });
           // 固定时钟，让截图可逐字节比较
           await tab.addInitScript(() => {
             const RealDate = Date, fixed = new RealDate('2026-09-16T06:00:00+08:00').getTime();
@@ -98,7 +99,14 @@ function bridgeScript(data) {
             window.Date = FrozenDate;
           });
           await tab.goto('file://' + path.join(panelDir, 'index.html') + '#' + page);
-          await tab.waitForSelector('#app .empty, #app .surface, #app .admin-stats, #modal', { timeout: 10000 }).catch(() => {});
+          const heading = name === 'offline' ? '连接失败' : ({run:'投票工作区',projects:'图片项目',history:'历史与报告',settings:'设置'})[page];
+          await tab.getByRole('heading', {name:heading,exact:true}).waitFor({timeout:10000});
+          assert.equal(await tab.locator('html').getAttribute('data-theme'),theme);
+          if(name==='offline') assert.match(await tab.locator('#app').innerText(),/连接中断/);
+          else {
+            const selector={run:name==='empty'?'.empty':'.run-grid',projects:'#project-list',history:'.table-wrap',settings:'#save-config'}[page];
+            await tab.locator('#app '+selector).first().waitFor({timeout:10000});
+          }
           await tab.waitForTimeout(250);
           const overflow = await tab.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
@@ -112,14 +120,15 @@ function bridgeScript(data) {
             overflow.scrollWidth <= overflow.innerWidth + 1,
             name + ' ' + width + 'px ' + page + ' 横向溢出 ' + overflow.scrollWidth + ' > ' + overflow.innerWidth + '（' + overflow.offenders.join(', ') + '）',
           );
-          if (shotsDir) await tab.screenshot({ path: path.join(shotsDir, name + '-' + page + '-' + width + '.png'), fullPage: true });
-          checked.push(name + '/' + page + '/' + width);
+          if (shotsDir) await tab.screenshot({ path: path.join(shotsDir, theme + '-' + name + '-' + page + '-' + width + '.png'), fullPage: true });
+          checked.push(theme + '/' + name + '/' + page + '/' + width);
           await context.close();
         }
       }
     }
+    }
     assert.deepEqual(errors, []);
-    console.log('PASS: ' + checked.length + ' 组页面（390/768/1440 × 运行/项目/历史/设置 × 正常/空态/断连）无横向溢出、无脚本错误');
+    console.log('PASS: ' + checked.length + ' 组页面（明暗主题 × 390/768/1440 × 运行/项目/历史/设置 × 正常/空态/断连）无横向溢出、无脚本错误');
     if (shotsDir) console.log('截图目录: ' + shotsDir);
   } finally {
     await browser.close();

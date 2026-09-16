@@ -29,7 +29,7 @@ const session = (over) => ({
 
 const history = [
   session({ id: 'h1', short_id: 'AE71C5C7', status: 'COMPLETED', report_state: 'ready', report_available: true, vote_count: 46, participant_count: 6 }),
-  session({ id: 'h2', short_id: 'B7061F3F', status: 'CANCELLED', report_state: 'missing', vote_count: 0, participant_count: 0 }),
+  session({ id: 'h2', short_id: 'B7061F3F', status: 'CANCELLED', report_state: 'missing', vote_count: 0, participant_count: 0, group_id: '654321' }),
   session({ id: 'h3', short_id: '7A31379F', status: 'COMPLETED', report_state: 'cleaned', vote_count: 1, participant_count: 1 }),
   session({ id: 'h4', short_id: 'AD630492', status: 'FAILED', report_state: 'failed', report_error: 'report generation failed: disk full', vote_count: 53, participant_count: 3 }),
   session({ id: 'h5', short_id: 'PAUSED01', status: 'PAUSED', report_state: 'generating', vote_count: 8, participant_count: 2, error_message: '连续 2 条消息发送失败，已自动暂停' }),
@@ -64,7 +64,12 @@ function bridgeScript() {
       apiGet: (endpoint, params = {}) => {
         if (payload.fail) return Promise.reject(new Error('连接中断'));
         if (endpoint === 'projects') return respond(payload.projects);
-        if (endpoint === 'sessions') return respond({ sessions: params.active === 'true' ? payload.active : payload.history, total: payload.total });
+        if (endpoint === 'sessions') {
+          const all = params.active === 'true' ? payload.active : payload.history;
+          if (!params.group_id) return respond({ sessions: all, total: payload.total });
+          const picked = all.filter((row) => row.group_id === params.group_id);
+          return respond({ sessions: picked, total: picked.length });
+        }
         if (endpoint === 'config') return respond({ values: payload.values, schema: payload.schema, revision: 3 });
         if (endpoint === 'providers') return respond(payload.providers);
         if (endpoint === 'groups') return window.__holdGroups ? new Promise(resolve=>window.__groupWaiters.push(()=>resolve({status:'ok',data:payload.groups}))) : respond(payload.groups);
@@ -161,6 +166,21 @@ function bridgeScript() {
             assert.equal(await tab.locator('#modal').evaluate(el=>el.open),false);
           }
           if(name==='rich' && page==='history') {
+            // 群号筛选：点击后必须给出可见状态，清除后恢复全部。
+            await tab.locator('#group-filter').fill('654321');
+            await tab.locator('[data-action="filter-history"]').click();
+            await tab.locator('.filter-state').first().waitFor({timeout:5000});
+            assert.match(await tab.locator('.filter-state').first().innerText(),/654321/);
+            assert.equal(await tab.locator('table tbody tr').count(),1);
+            await tab.locator('[data-action="clear-filter"]').click();
+            await tab.waitForFunction(()=>!document.querySelector('.filter-state'));
+            assert.equal(await tab.locator('table tbody tr').count(),5);
+            // 回车等同于点筛选
+            await tab.locator('#group-filter').fill('654321');
+            await tab.locator('#group-filter').press('Enter');
+            await tab.locator('.filter-state').first().waitFor({timeout:5000});
+            await tab.locator('[data-action="clear-filter"]').click();
+            await tab.waitForFunction(()=>!document.querySelector('.filter-state'));
             await tab.locator('[data-action="download"] .control-icon').first().click();
             assert.equal(await tab.evaluate(()=>window.__downloads[0].endpoint),'reports/download');
             await tab.locator('[data-action="cleanup"]').first().click();

@@ -12,7 +12,7 @@ const data = {
   candidates,
   characters:names.map((character,i)=>({character, candidate_ids:candidates.filter(c=>c.character===character).map(c=>c.candidate_id), average_score:i===0?8:i===1?0:null, vote_count:i<2?1:0, rank:i<2?i+1:null, candidate_count:i===0?5:1, score_distribution:i===0?{8:1}:i===1?{0:1}:{}, coverage:1, low_sample:i<2})),
   statistics:{unique_voters:1,total_valid_votes:2},metrics:{sent_count:7},
-  participant_details_available:true,participants:[{id:'p1',name:'Reader',vote_count:2,average_score:4,coverage:2/3}],
+  participant_details_available:true,participants:[{id:'p1',name:'Reader',vote_count:2,average_score:4,coverage:2/3},{id:'p2',name:'YL(啦啦MK丶lou)一个很长的昵称',vote_count:1,average_score:6,coverage:1/3}],
   votes:[{participant_id:'p1',character:'Alice',score:8,source_candidate_id:'c4'},{participant_id:'p1',character:'Zero',score:0,source_candidate_id:'missing'}]
 };
 (async()=>{
@@ -52,6 +52,14 @@ const data = {
   assert.match(await page.locator('#person-detail').innerText(),/来源图片不可用/);
   await page.locator('#person-sort').selectOption('low');
   assert.equal(await page.locator('#person-detail tbody tr').first().locator('td').first().innerText(),'Zero');
+  // 长昵称在列表里必须单行省略，不能把行高撑成两行。
+  const nameBox = await page.locator('.people-menu .person-name').first().evaluate((el) => ({
+    height: el.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(el).lineHeight),
+    overflow: getComputedStyle(el).textOverflow, whiteSpace: getComputedStyle(el).whiteSpace,
+  }));
+  assert.ok(nameBox.height <= nameBox.lineHeight + 2, 'participant name should stay on one line: ' + JSON.stringify(nameBox));
+  assert.equal(nameBox.overflow, 'ellipsis');
+  assert.equal(nameBox.whiteSpace, 'nowrap');
   await page.locator('#people-search').pressSequentially('Reader');
   assert.equal(await page.locator('#people-search').inputValue(),'Reader');
   await page.locator('[data-action="theme"]').click();

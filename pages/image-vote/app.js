@@ -31,7 +31,8 @@
     groupFilter = "",
     busy = false,
     connected = false,
-    refreshing = false;
+    refreshing = false,
+    inflight = null;
   let dialogOrigin = null,
     previewProject = null,
     editProject = null,
@@ -170,7 +171,7 @@
     );
   }
   function historyPage() {
-    return `<div class="toolbar history-filter"><input id="group-filter" placeholder="按群号筛选" aria-label="按群号筛选" value="${esc(groupFilter)}"><button data-action="filter-history">筛选</button></div><div class="table-wrap"><table><thead><tr><th>项目 / 场次</th><th>群</th><th>投票</th><th>报告</th><th>操作</th></tr></thead><tbody>${sessions.map((r) => `<tr><td><b>${esc(r.project_name)}</b><br><small>${esc(formatTime(r.created_at))} · ${esc(r.short_id)}<br>${r.vote_count} 票 · ${r.sent_count}/${r.candidate_count} 张已发送</small></td><td>${esc(r.group_id)}</td><td><span class="status-label status-${esc(r.status.toLowerCase())}">${status[r.status] || esc(r.status)}</span></td><td><span class="badge neutral">${reportStatus[r.report_state]}</span>${r.report_error ? `<p class="error">${esc(r.report_error)}</p>` : ""}</td><td><div class="history-tools">${r.report_available || r.report_state === "ready" ? `<button class="download-action" data-action="download" data-id="${esc(r.id)}">下载</button><button class="quiet danger" data-action="cleanup" data-id="${esc(r.id)}">清理</button>` : ""}${["COMPLETED", "CANCELLED"].includes(r.status) && r.report_state !== "generating" ? `<button data-action="export" data-id="${esc(r.id)}">${r.report_state === "ready" ? "重新生成" : "生成报告"}</button>` : ""}${["COMPLETED", "CANCELLED", "FAILED"].includes(r.status) ? `<button class="quiet danger" data-action="purge" data-id="${esc(r.id)}">彻底删除</button>` : ""}</div></td></tr>`).join("")}</tbody></table>${sessions.length ? "" : '<div class="empty">没有符合条件的历史记录</div>'}</div><div id="pagination"><button data-action="previous" ${offset === 0 ? "disabled" : ""}>上一页</button><span class="subtle">共 ${total} 场 · 第 ${Math.floor(offset / 30) + 1} 页</span><button data-action="next" ${offset + 30 >= total ? "disabled" : ""}>下一页</button></div>`;
+    return `<div class="toolbar history-filter"><input id="group-filter" placeholder="按群号筛选（回车或点筛选）" aria-label="按群号筛选" value="${esc(groupFilter)}"><button data-action="filter-history">筛选</button>${groupFilter ? `<span class="filter-state">筛选中：群 ${esc(groupFilter)} <button class="text-link" data-action="clear-filter">清除</button></span>` : ""}</div><div class="table-wrap"><table><thead><tr><th>项目 / 场次</th><th>群</th><th>投票</th><th>报告</th><th>操作</th></tr></thead><tbody>${sessions.map((r) => `<tr><td><b>${esc(r.project_name)}</b><br><small>${esc(formatTime(r.created_at))} · ${esc(r.short_id)}<br>${r.vote_count} 票 · ${r.sent_count}/${r.candidate_count} 张已发送</small></td><td>${esc(r.group_id)}</td><td><span class="status-label status-${esc(r.status.toLowerCase())}">${status[r.status] || esc(r.status)}</span></td><td><span class="badge neutral">${reportStatus[r.report_state]}</span>${r.report_error ? `<p class="error">${esc(r.report_error)}</p>` : ""}</td><td><div class="history-tools">${r.report_available || r.report_state === "ready" ? `<button class="download-action" data-action="download" data-id="${esc(r.id)}">下载</button><button class="quiet danger" data-action="cleanup" data-id="${esc(r.id)}">清理</button>` : ""}${["COMPLETED", "CANCELLED"].includes(r.status) && r.report_state !== "generating" ? `<button data-action="export" data-id="${esc(r.id)}">${r.report_state === "ready" ? "重新生成" : "生成报告"}</button>` : ""}${["COMPLETED", "CANCELLED", "FAILED"].includes(r.status) ? `<button class="quiet danger" data-action="purge" data-id="${esc(r.id)}">彻底删除</button>` : ""}</div></td></tr>`).join("")}</tbody></table>${sessions.length ? "" : '<div class="empty">没有符合条件的历史记录</div>'}</div><div id="pagination"><button data-action="previous" ${offset === 0 ? "disabled" : ""}>上一页</button><span class="subtle">共 ${total} 场 · 第 ${Math.floor(offset / 30) + 1} 页</span><button data-action="next" ${offset + 30 >= total ? "disabled" : ""}>下一页</button></div>`;
   }
   const categories = [
     ["voting", "投票规则"],
@@ -218,9 +219,14 @@
     return `<div class="savebar"><p id="dirty-label">${dirty() ? "有未保存的修改" : "已与实际配置同步"}<br><small>评分与间隔用于以后开始的投票；报告参数用于下次生成。</small></p><div class="actions" style="margin:0"><button data-action="discard" ${dirty() ? "" : "disabled"}>放弃修改</button><button id="save-config" class="primary" data-action="save-config" ${dirty() ? "" : "disabled"}>保存配置</button></div></div><div class="toolbar"><input id="config-search" aria-label="搜索配置" placeholder="搜索配置名称或说明" value="${esc(configSearch)}"></div><div class="settings-layout"><nav class="settings-nav" aria-label="配置分组">${categories.map(([key, label]) => `<button data-category="${key}" class="${key === settingsTab ? "active" : ""}">${label}</button>`).join("")}</nav><section class="settings-form">${entries.map(([key, f]) => field(key, f)).join("") || '<p class="empty">没有匹配的配置项</p>'}${settingsTab === "ai" ? '<div class="actions"><button data-action="prompt-preview">预览提示词</button><button data-action="prompt-default">恢复默认提示词</button></div>' : ""}<p id="config-error" class="error" role="alert"></p></section></div>`;
   }
   async function refresh(force = false) {
-    if (refreshing) return;
+    if (refreshing) {
+      // 轮询进行中时，强制刷新要等它结束后再跑一次，否则点击会被静默丢弃。
+      if (!force || !inflight) return;
+      await inflight.catch(() => {});
+    }
     refreshing = true;
-    try {
+    inflight = (async () => {
+      try {
       const [p, a, h, c] = await Promise.all([
         get("projects"),
         get("sessions", { active: "true" }),
@@ -248,9 +254,12 @@
         $("#app").innerHTML =
           `<div class="empty"><h2>无法打开工作区</h2><p>${esc(e.message)}</p><button data-action="refresh">重试</button></div>`;
       toast(e.message);
-    } finally {
-      refreshing = false;
-    }
+      } finally {
+        refreshing = false;
+        inflight = null;
+      }
+    })();
+    await inflight;
   }
   async function mutate(fn) {
     if (busy || !connected) return;
@@ -561,9 +570,15 @@
           });
           break;
         case "filter-history":
-          groupFilter = $("#group-filter").value.trim();
+          groupFilter = $('#group-filter').value.trim();
           offset = 0;
-          await refresh();
+          await refresh(true);
+          toast(groupFilter ? "已按群号 " + groupFilter + " 筛选" : "已显示全部场次");
+          break;
+        case "clear-filter":
+          groupFilter = "";
+          offset = 0;
+          await refresh(true);
           break;
         case "next":
           offset += 30;
@@ -606,6 +621,12 @@
       }
     } catch (error) {
       toast(error.message);
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.id === "group-filter") {
+      e.preventDefault();
+      $('[data-action="filter-history"]').click();
     }
   });
   document.addEventListener("input", (e) => {

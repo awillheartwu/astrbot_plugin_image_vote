@@ -632,6 +632,17 @@ tr.selected {
 .people-menu small {
   display: block;
 }
+/* 长昵称在列表里单行省略：完整名字用 title 与右侧详情查看，避免列表行高参差。 */
+.people-menu .person-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.people-menu button > span {
+  min-width: 0;
+}
 .person-heading {
   display: flex;
   align-items: center;
@@ -1115,6 +1126,9 @@ dialog.lightbox img {
   }
   .people-menu small {
     font-size: 10px;
+  }
+  .people-menu .person-name {
+    max-width: 42vw;
   }
   .image-grid {
     grid-template-columns: repeat(2, 1fr);

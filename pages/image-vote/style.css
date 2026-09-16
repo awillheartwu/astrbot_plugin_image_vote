@@ -241,6 +241,26 @@ small {
   font-size: 13px;
   color: var(--muted);
 }
+.filter-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  font-size: 12px;
+}
+.filter-state .text-link {
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: underline;
+}
 .toolbar .count {
   margin-left: auto;
   color: var(--muted);

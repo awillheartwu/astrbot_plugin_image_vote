@@ -31,13 +31,13 @@ BUNDLE="${TMPDIR:-/tmp}/lirating-deploy.bundle"
 
 say() { printf '\n== %s\n' "$*"; }
 
-say "1/4 本地打包 $REF"
+say "1/4 本地打包 ${REF}"
 git -C "$REPO_DIR" bundle create "$BUNDLE" "$REF" 2>&1 | tail -1
 COMMIT="$(git -C "$REPO_DIR" rev-parse --short "$REF")"
 VERSION="$(git -C "$REPO_DIR" show "$REF:metadata.yaml" | awk '/^version:/ {print $2}')"
-echo "提交 $COMMIT，版本 $VERSION"
+echo "提交 ${COMMIT}，版本 ${VERSION}"
 
-say "2/4 快进部署到 $SSH_HOST:$PLUGIN_DIR"
+say "2/4 快进部署到 ${SSH_HOST}:${PLUGIN_DIR}"
 ssh -i "$SSH_KEY" -p "$SSH_PORT" -o BatchMode=yes "$SSH_HOST" "cat > /tmp/lirating-deploy.bundle; cd '$PLUGIN_DIR' && git fetch /tmp/lirating-deploy.bundle '$REF' >/dev/null 2>&1 && git merge --ff-only FETCH_HEAD && rm -f /tmp/lirating-deploy.bundle" < "$BUNDLE"
 rm -f "$BUNDLE"
 
@@ -81,4 +81,4 @@ if version not in (loaded[-1] if loaded else ''):
     print('注意：日志中的版本与本次部署版本不一致，请确认重载是否生效')
 PY
 
-say "完成：$COMMIT（$VERSION）已部署并重载"
+say "完成：${COMMIT}（${VERSION}）已部署并重载"

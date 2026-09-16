@@ -286,7 +286,7 @@ class VoteApplication:
                     break
                 # 同一人物的图片连续发送；最后一张成功发送后才开始完整人物投票间隔。
                 if not next_is_same_character:
-                    await control.wait_for_interval(self._next_wait_seconds(session, is_last, elapsed))
+                    await control.wait_for_interval(self._next_wait_seconds(session, is_last))
 
             session.status = SessionStatus.FINALIZING
             session.finished_at = utc_now()
@@ -676,7 +676,7 @@ class VoteApplication:
             group_total=group_total,
         )
 
-    def _next_wait_seconds(self, session: Session, is_last: bool, elapsed: float) -> int:
+    def _next_wait_seconds(self, session: Session, is_last: bool) -> int:
         """A character window always starts after its final image finishes sending."""
         if is_last:
             return session.final_grace_seconds

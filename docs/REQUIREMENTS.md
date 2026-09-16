@@ -17,7 +17,7 @@
 5. 唯一票口径为 `(session_id, character_name, voter_id)`：同一用户对同一人物只保留一票；重复投票由 `same_user_vote_policy` 决定最终值，默认最后一次生效。若评分范围包含 0，则 `0` 和 `0分` 均为有效票。
 6. 某人物至少一张图片成功发送即可投票；全部图片发送失败时不开放该人物的普通数字投票。暂停与进程恢复保留当前人物及人物内部发送进度；提前结束按已发送图片和已收到的人物票结算。
 7. 报告以人物为统计、排名和逐人评分单位。概览展示人物排名，「全部图片」把相同人物放入同一分组，图片本身不再单独计票或排名。
-8. `interval_includes_send_time` 仅为旧配置兼容保留；人物模式的等待始终从该人物最后一张图片发送完成后开始，不扣除上传耗时。
+8. 固定周期设置已移除；人物模式的等待始终从该人物最后一张图片发送完成后开始，不扣除上传耗时。
 
 ---
 
@@ -550,7 +550,7 @@ FINALIZING
 COMPLETED
 ```
 
-间隔语义：默认 `interval_includes_send_time = false`，即「上一张发送完成后等待 `interval_seconds` 秒」，因此实际出图间隔 = 图片上传耗时 + 间隔，大图会明显拉长；开启后改为周期制，等待时间 = `max(0, interval_seconds - 本张发送耗时)`，节奏更接近设定值。最后一张仍按 `final_grace_seconds` 等待。
+间隔语义：同一人物内图片连续发送，最后一张发送完成后等待完整 `interval_seconds` 秒；最后一个人物按 `final_grace_seconds` 等待，不扣除发送耗时。
 
 ---
 
@@ -1380,7 +1380,6 @@ recursive_scan: bool = false
 
 ```text
 default_interval_seconds: int = 20
-interval_includes_send_time: bool = false
 final_grace_seconds: int = 20
 score_min: int = 1
 score_max: int = 4

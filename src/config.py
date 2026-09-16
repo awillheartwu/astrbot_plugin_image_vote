@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from typing import Any, Dict, Mapping, Tuple
-from .ai_summary_service import validate_prompt_template
+from .ai_summary_service import validate_prompt_template, DEFAULT_PROMPT_TEMPLATE
 
 
 DEFAULT_CONFIG = {
@@ -35,7 +35,7 @@ DEFAULT_CONFIG = {
     "single_html_max_mb": 50,
     "ai_summary_enabled": True,
     "ai_provider_id": "",
-    "ai_prompt_template": "",
+    "ai_prompt_template": DEFAULT_PROMPT_TEMPLATE,
     "ai_top_n": 5,
     "ai_bottom_n": 3,
     "auto_resume_after_restart": False,
@@ -47,7 +47,6 @@ DEFAULT_CONFIG = {
     "notify_on_finish": True,
     "auto_report_on_finish": True,
     "send_report_html": False,
-    "interval_includes_send_time": False,
 }
 
 
@@ -93,7 +92,7 @@ class VoteConfig:
     single_html_max_mb: int = 50
     ai_summary_enabled: bool = True
     ai_provider_id: str = ""
-    ai_prompt_template: str = ""
+    ai_prompt_template: str = DEFAULT_PROMPT_TEMPLATE
     ai_top_n: int = 5
     ai_bottom_n: int = 3
     auto_resume_after_restart: bool = False
@@ -105,7 +104,6 @@ class VoteConfig:
     notify_on_finish: bool = True
     auto_report_on_finish: bool = True
     send_report_html: bool = False
-    interval_includes_send_time: bool = False
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "VoteConfig":
@@ -115,6 +113,8 @@ class VoteConfig:
         values = {key: value for key, value in values.items() if key in field_names}
         values["allowed_group_ids"] = tuple(str(item) for item in values.get("allowed_group_ids", []))
         values["web_browse_roots"] = tuple(str(item) for item in values.get("web_browse_roots", []))
+        if isinstance(values.get("ai_prompt_template"), str) and not values["ai_prompt_template"].strip():
+            values["ai_prompt_template"] = DEFAULT_PROMPT_TEMPLATE
         config = cls(**values)
         config.validate()
         return config

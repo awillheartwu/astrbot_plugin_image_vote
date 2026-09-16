@@ -90,6 +90,21 @@ const data = {
   await mount(fractional);
   assert.equal(await page.locator('#full-ranking .score-high').first().innerText(),'3.50');
   assert.match(await page.locator('.score-legend').first().innerText(),/3.4–4/);
+  // Equal-score voters share a compact avatar row; modal image rules must not stretch them.
+  await mount({...data,participants:[{...data.participants[0],avatar:svg},{id:'p2',name:'Another voter',avatar:svg},{id:'p3',name:'No avatar'}],votes:[...data.votes,{participant_id:'p2',character:'Alice',score:8},{participant_id:'p3',character:'Alice',score:3}]});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.locator('[data-page="images"]').click();
+  await page.locator('[data-detail="Alice"]').first().click();
+  assert.equal(await page.locator('.voter-score-group').count(),2);
+  assert.equal(await page.locator('.voter-score-group').first().locator('.voter-avatar').count(),2);
+  assert.equal(await page.locator('.voter-avatar .placeholder').count(),1);
+  const firstAvatar=page.locator('.voter-avatar').first();
+  await firstAvatar.hover();
+  assert.equal(await firstAvatar.locator('.voter-tooltip').isVisible(),true);
+  assert.equal(await page.locator('.voter-avatar img').first().evaluate(el=>el.getBoundingClientRect().width),32);
+  assert.ok(await page.locator('dialog .histogram').evaluate(el=>el.getBoundingClientRect().width)<=360);
+  await firstAvatar.click();
+  assert.ok(await page.locator('.person-charts .histogram').evaluate(el=>el.getBoundingClientRect().width)<=360);
   // Structured summary escapes HTML; old text remains accessible under disclosure.
   await mount({...data,ai_summary:'stored JSON',ai_analysis:{headline:'<headline>',insights:[{title:'Small sample',text:'<script>bad()</script>'}],closing:'Done'}});
   assert.equal(await page.locator('.ai-headline').innerText(),'<headline>');

@@ -166,9 +166,19 @@
     if (!dialog.open) dialog.showModal();
     else dialog.querySelector("[data-close]")?.focus({preventScroll:true});
   }
+  function groupedVoters(name) {
+    const groups=new Map();
+    votes.filter(v=>v.character===name).forEach(v=>{
+      const person=people.find(p=>p.id===v.participant_id);
+      if(!person) return;
+      if(!groups.has(v.score)) groups.set(v.score,[]);
+      groups.get(v.score).push(person);
+    });
+    return `<section class="voter-groups"><h3>最终参与者评分</h3>${[...groups].sort(([a],[b])=>b-a).map(([value,persons])=>`<div class="voter-score-group"><div class="voter-score ${scoreClass(value)}"><b>${value}<small> 分</small></b><span>${persons.length} 人</span></div><div class="voter-avatar-list">${persons.map(person=>`<button class="voter-avatar" data-person="${esc(person.id)}" title="${esc(person.name)} · ${value} 分" aria-label="查看 ${esc(person.name)}，评分 ${value} 分">${avatar(person)}<span class="voter-tooltip" role="tooltip">${esc(person.name)}</span></button>`).join("")}</div></div>`).join("") || '<p class="muted">暂无评分</p>'}<p class="panel-footnote">悬停或聚焦头像查看昵称，点击查看参与者详情。</p></section>`;
+  }
   function openCharacter(name) {
     const c=byCharacter.get(name); if(!c) return;
-    showDialog(`<div class="modal-head"><h2>${esc(name)}</h2><button data-close>关闭</button></div><p><strong class="${scoreClass(c.average_score)}">${score(c.average_score)}</strong> · ${c.vote_count} 票 · ${imagesFor(c).length} 张图片 ${characterBadge(c)}</p><div class="report-grid detail-gallery">${imagesFor(c).map(imageTile).join("")}</div><h3>人物评分分布</h3>${histogram(c.score_distribution || {})}${d.participant_details_available?`<h3>最终参与者评分</h3><div class="data-table">${votes.filter(v=>v.character===name).map(v=>{const person=people.find(p=>p.id===v.participant_id);return person?`<div class="person-row">${avatar(person)}<button class="text-link" data-person="${esc(person.id)}">${esc(person.name)}</button><span class="right ${scoreClass(v.score)}">${v.score} 分</span></div>`:"";}).join("") || '<p class="muted">暂无评分</p>'}</div>`:""}`);
+    showDialog(`<div class="modal-head"><h2>${esc(name)}</h2><button data-close>关闭</button></div><p><strong class="${scoreClass(c.average_score)}">${score(c.average_score)}</strong> · ${c.vote_count} 票 · ${imagesFor(c).length} 张图片 ${characterBadge(c)}</p><div class="report-grid detail-gallery">${imagesFor(c).map(imageTile).join("")}</div><div class="character-detail-stats"><section class="surface distribution-panel"><div class="panel-heading"><span class="eyebrow">SCORE DISTRIBUTION</span><h3>人物评分分布</h3></div>${histogram(c.score_distribution || {})}</section>${d.participant_details_available?groupedVoters(name):""}</div>`);
   }
   function openImage(id) {
     const row=byImage.get(id); if(!row) return;
@@ -209,7 +219,7 @@
   });
   document.addEventListener("error", (event) => {
     if (event.target.tagName === "IMG" && (root.contains(event.target) || dialog.contains(event.target))) {
-      const fallback = document.createElement("span"); fallback.className = "image-error"; fallback.textContent = "图片不可用"; event.target.replaceWith(fallback);
+      const fallback = document.createElement("span"); const isAvatar = event.target.classList.contains("avatar"); fallback.className = isAvatar ? "placeholder" : "image-error"; fallback.textContent = isAvatar ? "?" : "图片不可用"; event.target.replaceWith(fallback);
     }
   }, true);
   render();

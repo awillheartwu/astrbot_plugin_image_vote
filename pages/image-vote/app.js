@@ -548,7 +548,7 @@
           });
           break;
         case "prompt-default":
-          draft.ai_prompt_template = "";
+          draft.ai_prompt_template = config.schema.ai.items.ai_prompt_template.default;
           render();
           break;
         case "prompt-preview":

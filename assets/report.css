@@ -1410,7 +1410,7 @@ dialog.lightbox img {
 .report-modal {
   width: min(780px, calc(100vw - 24px));
 }
-.report-modal img {
+.report-modal > img {
   width: 100%;
   max-height: 55vh;
   object-fit: contain;
@@ -1813,3 +1813,23 @@ th { background: var(--panel-top); }
   .character-ranking { grid-template-columns: repeat(3,minmax(0,1fr)); }
 }
 @media (max-width: 380px) { .character-ranking { grid-template-columns: minmax(0,1fr); } }
+
+
+/* Keep chart typography at the overview scale, even in wide panels. */
+.histogram { width: 100%; max-width: 360px; margin-inline: auto; }
+.person-charts { align-items: start; }
+.character-detail-stats { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 24px; align-items: start; margin-top: 20px; }
+.character-detail-stats > .surface { padding: 16px; background: linear-gradient(135deg,var(--panel-top),var(--panel-bottom)); }
+.character-detail-stats > :only-child { grid-column: 1 / -1; max-width: 420px; width: 100%; margin-inline: auto; }
+.voter-groups { min-width: 0; }
+.voter-score-group { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 12px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.voter-score b, .voter-score > span { display: block; }
+.voter-score b { font-size: 18px; white-space: nowrap; }
+.voter-score > span { color: var(--muted); font-size: 11px; }
+.voter-avatar-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.voter-avatar { position: relative; display: inline-flex; padding: 3px; border: 1px solid var(--line); background: var(--surface); border-radius: 50%; width: 40px; height: 40px; flex: 0 0 40px; }
+.voter-avatar .avatar, .voter-avatar .placeholder { width: 32px; height: 32px; object-fit: cover; border-radius: 50%; display: block; line-height: 32px; text-align: center; }
+.voter-avatar:hover, .voter-avatar:focus-visible { border-color: var(--accent); }
+.voter-tooltip { display: none; position: absolute; z-index: 5; bottom: calc(100% + 7px); left: 0; max-width: 180px; width: max-content; white-space: normal; overflow-wrap: anywhere; padding: 5px 9px; border: 1px solid var(--line); background: var(--ink); color: var(--bg); border-radius: 5px; font-size: 12px; box-shadow: var(--shadow); pointer-events: none; }
+.voter-avatar:hover .voter-tooltip, .voter-avatar:focus-visible .voter-tooltip { display: block; }
+@media (max-width: 700px) { .character-detail-stats { grid-template-columns: minmax(0,1fr); } }

@@ -592,18 +592,9 @@ class ApplicationTest(unittest.TestCase):
                 "s1", "A1B2C3D4", "g1", "umo", "demo", "/tmp/demo", SessionStatus.RUNNING,
                 interval_seconds=5, final_grace_seconds=20,
             )
-            self.assertEqual(application._next_wait_seconds(session, False, 17.0), 5)
-            self.assertEqual(application._next_wait_seconds(session, True, 17.0), 20)
+            self.assertEqual(application._next_wait_seconds(session, False), 5)
+            self.assertEqual(application._next_wait_seconds(session, True), 20)
 
-            periodic = VoteConfig.from_mapping(
-                {"input_root": "/a", "output_root": "/b", "interval_includes_send_time": True}
-            )
-            compatibility_app = VoteApplication(
-                periodic, ProjectService(Path("/a")), None, SessionManager(), VoteRouter()
-            )
-            self.assertEqual(compatibility_app._next_wait_seconds(session, False, 3.0), 5)
-            self.assertEqual(compatibility_app._next_wait_seconds(session, False, 17.0), 5)
-            self.assertEqual(compatibility_app._next_wait_seconds(session, True, 17.0), 20)
 
         asyncio.run(scenario())
 

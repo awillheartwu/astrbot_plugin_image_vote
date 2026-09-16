@@ -131,6 +131,30 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
             self.service.browse(str((self.root/'input').resolve()),'../')
         self.assertEqual({p['name'] for p in self.service.projects()},{'demo','registered'})
 
+    async def test_cached_preview_does_not_read_symlink_outside_project(self):
+        self.plugin.project_registry.register('safe',self.root/'input'/'demo')
+        await self.service.inspect_cached('safe',False)
+        outside=self.root/'private.png';outside.write_bytes(b'not project data')
+        image=self.root/'input'/'demo'/'one.png';image.unlink();image.symlink_to(outside)
+        from unittest.mock import Mock
+        self.service.thumbnail_data_uri=Mock(return_value='should-not-be-read')
+        preview=await self.service.preview('safe')
+        self.service.thumbnail_data_uri.assert_not_called()
+        self.assertNotIn('thumb',preview['first'][0])
+
+    async def test_snapshot_cache_tracks_project_path_and_coalesces_requests(self):
+        from unittest.mock import patch
+        self.plugin.project_registry.register('cached', self.root/'input'/'demo')
+        inspect=self.plugin.project_service.inspect
+        with patch.object(self.plugin.project_service,'inspect',wraps=inspect) as probe:
+            await asyncio.gather(*(self.service.inspect_cached('cached',False) for _ in range(6)))
+            self.assertEqual(probe.call_count,1)
+            other=self.root/'input'/'other';other.mkdir()
+            self.plugin.project_registry.register('cached',other)
+            changed=await self.service.inspect_cached('cached',False)
+            self.assertEqual(Path(changed.project_path),other.resolve())
+            self.assertEqual(probe.call_count,2)
+
     async def test_thumbnail_endpoint_reuses_one_scan_and_caches_images(self):
         """缩略图接口必须复用快照缓存并走图片缓存；这条路径曾因写错作用域整段报错。"""
         self.plugin.project_registry.register('registered', self.root/'input'/'demo')
@@ -154,11 +178,8 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
             import PIL  # noqa: F401
         except ImportError:
             self.skipTest('Pillow 未安装')
-        import base64
-        png = base64.b64decode(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
-        )
-        (self.root/'input'/'demo'/'one.png').write_bytes(png)
+        from PIL import Image
+        Image.new('RGB', (16,16), (80,120,160)).save(self.root/'input'/'demo'/'one.png')
         self.plugin.project_registry.register('registered', self.root/'input'/'demo')
         preview = await self.service.preview('registered')
         self.assertTrue(str(preview['first'][0].get('thumb')).startswith('data:image/webp;base64,'))

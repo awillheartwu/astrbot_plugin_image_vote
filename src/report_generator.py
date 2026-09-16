@@ -7,7 +7,6 @@ import html
 import json
 import mimetypes
 import os
-import tempfile
 import uuid
 import weakref
 import re
@@ -21,6 +20,7 @@ from typing import Dict, Iterable, List, Optional, Protocol
 from .character_service import character_of
 from .logging_utils import get_logger
 from .models import Candidate, Session, SessionStatistics, Vote, status_label
+from .maintenance import owned_temporary_directory
 from .report_data import enrich_report
 from .ai_summary_service import summary_text
 from .path_guard import PathGuard, UnsafePathError
@@ -227,7 +227,7 @@ class DirectoryReportGenerator:
         # Complete in a staging directory. An unsuccessful re-export leaves the previous report intact.
         output_root = Path(output_root).expanduser().resolve()
         output_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix='.image-vote-', dir=output_root) as temporary:
+        with owned_temporary_directory(output_root, '.image-vote-') as temporary:
             staged = await self._generate_directory(
                 session, candidates, statistics, source_root, Path(temporary), image_processor,
                 ai_summary=ai_summary, votes=votes, include_participants=include_participants)

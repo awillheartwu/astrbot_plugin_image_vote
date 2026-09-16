@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 import tempfile
+import threading
 import zipfile
 from dataclasses import asdict
 from pathlib import Path
@@ -39,24 +40,34 @@ class WorkspaceService:
         self.lock = asyncio.Lock()
         self.group_cache = []
         self._groups_at = 0
+        self._snapshot_lock = asyncio.Lock()
+        self._thumbnail_lock = threading.Lock()
         self._snapshots = {}
         self._thumbnails = {}
         self.schema = json.loads((Path(__file__).resolve().parents[1] / '_conf_schema.json').read_text())
 
     async def inspect_cached(self, name: str, recursive: bool):
-        """带 20 秒 TTL 的项目快照：预检与 6 张缩略图共用一次扫描结果。"""
-        key = (name, bool(recursive))
-        now = asyncio.get_running_loop().time()
-        cached = self._snapshots.get(key)
-        if cached is not None and now - cached[0] < SNAPSHOT_TTL_SECONDS:
-            return cached[1]
-        snapshot = await asyncio.to_thread(self.plugin.project_service.inspect, name, recursive)
-        self._snapshots = {k: v for k, v in self._snapshots.items() if now - v[0] < SNAPSHOT_TTL_SECONDS}
-        self._snapshots[key] = (now, snapshot)
-        return snapshot
+        async with self._snapshot_lock:
+            project_path = str(self.plugin.project_service.resolve_project_path(name))
+            key = (name, project_path, bool(recursive))
+            now = asyncio.get_running_loop().time()
+            self._snapshots = {k:v for k,v in self._snapshots.items() if now-v[0]<SNAPSHOT_TTL_SECONDS}
+            cached = self._snapshots.get(key)
+            if cached is not None:
+                return cached[1]
+            snapshot = await asyncio.to_thread(self.plugin.project_service.inspect, name, recursive)
+            if len(self._snapshots) >= 16:
+                self._snapshots.pop(next(iter(self._snapshots)))
+            self._snapshots[key] = (now, snapshot)
+            return snapshot
 
     def thumbnail_data_uri(self, source: Path, box: int = 480) -> str:
         """把原图压成小尺寸 WEBP 的 data URI；按「路径 + 修改时间 + 尺寸」缓存。"""
+        # Bound peak decoded-image memory and protect the cache across worker threads.
+        with self._thumbnail_lock:
+            return self._thumbnail_data_uri_locked(source, box)
+
+    def _thumbnail_data_uri_locked(self, source: Path, box: int) -> str:
         import io
         from PIL import Image, ImageOps
         stat = source.stat()
@@ -197,8 +208,11 @@ class WorkspaceService:
         # 预检弹窗直接吃内联缩略图：不再由前端为每张图各发一次请求（那会各自再扫一次目录并解码原图）。
         first = snapshot.candidates[:6]
         preview_root = Path(snapshot.project_path)
+        def preview_thumbnail(candidate):
+            safe = PathGuard(preview_root).ensure_within(preview_root / candidate.source_relative_path, allow_root=False)
+            return self.thumbnail_data_uri(safe, THUMBNAIL_PREVIEW_SIZE)
         thumbs = await asyncio.gather(*(
-            asyncio.to_thread(self.thumbnail_data_uri, preview_root / candidate.source_relative_path, THUMBNAIL_PREVIEW_SIZE)
+            asyncio.to_thread(preview_thumbnail, candidate)
             for candidate in first
         ), return_exceptions=True)
         first_rows = []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -111,6 +112,7 @@ class ImageVotePlugin(Star):
         self.report_activity = _activity_module.ReportActivity()
         self._session_probe_cache: Dict[str, float] = {}
         self._config_checked_at = 0.0
+        self._maintenance_task = None
         self.workspace_api = None
         self.store = None
         self.session_manager = None
@@ -314,26 +316,36 @@ class ImageVotePlugin(Star):
     async def initialize(self):
         await self.store.initialize()
         await self.application.recover_incomplete_sessions()
-        self.run_self_maintenance()
+        await self.run_self_maintenance()
+        self._maintenance_task = asyncio.create_task(self._maintenance_loop())
         self.workspace_api = _workspace_module.WorkspaceAPI(self)
         if self.workspace_api.register():
             self.workspace_api.ready = True
 
-    def run_self_maintenance(self) -> None:
+    async def run_self_maintenance(self) -> None:
         """启动/重载时清理插件自有产物：过期报告、过期头像缓存、残留 staging 目录。"""
         reports = self.application.cleanup_expired_reports()
         data_dir = get_plugin_data_dir(self.context, Path(self.settings.output_root).expanduser())
-        avatars = _maintenance_module.prune_avatar_cache(
+        avatars = await asyncio.to_thread(_maintenance_module.prune_avatar_cache,
             data_dir / 'avatar_cache', self.settings.avatar_cache_retention_days
         )
-        temps = _maintenance_module.prune_stale_temp_dirs(
-            _maintenance_module.temp_scan_bases(Path(self.settings.output_root).expanduser())
+        temps = await asyncio.to_thread(_maintenance_module.prune_stale_temp_dirs,
+            _maintenance_module.temp_scan_bases(Path(self.settings.output_root).expanduser(), data_dir)
         )
         if reports.removed or avatars or temps:
             logger.info(
                 "维护清理：过期报告 %d 个（跳过 %d 个使用中），头像缓存 %d 个，残留临时目录 %d 个",
                 reports.removed, reports.skipped, avatars, temps,
             )
+
+    async def _maintenance_loop(self):
+        while True:
+            await asyncio.sleep(3600)
+            try:
+                self._ensure_config()
+                await self.run_self_maintenance()
+            except Exception:
+                logger.exception("定时维护失败，将在下一周期重试")
 
     @filter.command("vote")
     async def vote_command(self, event: Any):
@@ -559,6 +571,10 @@ class ImageVotePlugin(Star):
         return False
 
     async def terminate(self):
+        if self._maintenance_task is not None:
+            self._maintenance_task.cancel()
+            await asyncio.gather(self._maintenance_task, return_exceptions=True)
+            self._maintenance_task = None
         if self.workspace_api is not None:
             await self.workspace_api.close()
         await self.session_manager.shutdown()

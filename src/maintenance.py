@@ -1,66 +1,80 @@
-"""插件自有产物清理：头像缓存与中断导出留下的临时目录。
-
-插件写入磁盘的位置只有两处：AstrBot 数据目录下的 `plugin_data/<插件名>/`
-（vote.db、projects.json、avatar_cache）与配置的报告输出目录（报告与 staging）。
-这个模块负责把这两处里过期的、不再需要的文件清掉，避免长跑实例无限膨胀。
-"""
+"""Bounded maintenance of explicitly owned caches and abandoned temporary directories."""
 from __future__ import annotations
-
+import json
+import os
+import re
 import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterable, List, Tuple
-
 from .logging_utils import get_logger
 
 logger = get_logger()
+STALE_TEMP_SECONDS = 86400
+TEMP_MARKER = '.lirating-temp.json'
+OWNER = 'astrbot_plugin_image_vote'
 
-STALE_TEMP_SECONDS = 24 * 3600
-TEMP_PREFIXES = ('.image-vote-', 'image-vote-download-')
+
+def owned_temporary_directory(base: Path, prefix: str):
+    base = Path(base)
+    base.mkdir(parents=True, exist_ok=True)
+    temporary = tempfile.TemporaryDirectory(prefix=prefix, dir=base)
+    (Path(temporary.name) / TEMP_MARKER).write_text(json.dumps({'owner': OWNER, 'pid': os.getpid()}))
+    return temporary
 
 
 def prune_avatar_cache(cache_root: Path, retention_days: int) -> int:
-    """删除超过保留期的头像缓存文件（仅文件，不递归、不跟随符号链接）。"""
     cache_root = Path(cache_root)
-    if retention_days <= 0 or not cache_root.is_dir():
+    if retention_days <= 0 or cache_root.is_symlink() or not cache_root.is_dir():
         return 0
     cutoff = time.time() - retention_days * 86400
     removed = 0
-    for entry in cache_root.iterdir():
-        try:
-            if entry.is_file() and not entry.is_symlink() and entry.stat().st_mtime < cutoff:
-                entry.unlink()
-                removed += 1
-        except OSError:
-            continue
+    try:
+        for entry in cache_root.iterdir():
+            try:
+                if re.fullmatch(r'[a-f0-9]{64}\.webp', entry.name) and not entry.is_symlink() and entry.is_file() and entry.stat().st_mtime < cutoff:
+                    entry.unlink(); removed += 1
+            except OSError:
+                continue
+    except OSError as exc:
+        logger.warning('头像缓存清理失败：%s', exc)
     return removed
 
 
-def prune_stale_temp_dirs(bases: Iterable[Tuple[Path, Tuple[str, ...]]], age_seconds: int = STALE_TEMP_SECONDS) -> int:
-    """删除中断的导出/下载在报告目录与系统临时目录里留下的 staging 目录。"""
+def prune_stale_temp_dirs(bases, age_seconds: int = STALE_TEMP_SECONDS) -> int:
     cutoff = time.time() - max(60, age_seconds)
     removed = 0
     for base, prefixes in bases:
         base = Path(base)
-        if not base.is_dir():
+        if base.is_symlink() or not base.is_dir():
             continue
-        for entry in base.iterdir():
-            if not entry.is_dir() or entry.is_symlink():
-                continue
-            if not entry.name.startswith(tuple(prefixes)):
-                continue
-            try:
-                if entry.stat().st_mtime >= cutoff:
+        try:
+            for entry in base.iterdir():
+                try:
+                    if entry.is_symlink() or not entry.is_dir() or not entry.name.startswith(prefixes):
+                        continue
+                    marker = entry / TEMP_MARKER
+                    if marker.is_symlink() or entry.stat().st_mtime >= cutoff:
+                        continue
+                    data = json.loads(marker.read_text())
+                    if data.get('owner') != OWNER or type(data.get('pid')) is not int or data['pid'] <= 0:
+                        continue
+                    try:
+                        os.kill(data['pid'], 0)
+                    except ProcessLookupError:
+                        pass
+                    except OSError:
+                        continue  # Unknown/permission-denied owners are never removed.
+                    else:
+                        continue  # Includes another instance and long-running active jobs.
+                    shutil.rmtree(entry); removed += 1
+                except (OSError, ValueError, TypeError):
                     continue
-                shutil.rmtree(entry)
-                removed += 1
-                logger.info("清理残留临时目录：%s", entry)
-            except OSError as exc:
-                logger.warning("清理临时目录失败 %s：%s", entry, exc)
+        except OSError as exc:
+            logger.warning('临时目录清理失败：%s', exc)
     return removed
 
 
-def temp_scan_bases(output_root: Path) -> List[Tuple[Path, Tuple[str, ...]]]:
-    """需要扫描的两处：报告根目录（导出 staging）与系统临时目录（下载打包）。"""
-    return [(Path(output_root), ('.image-vote-',)), (Path(tempfile.gettempdir()), TEMP_PREFIXES)]
+def temp_scan_bases(output_root: Path, data_root: Path):
+    return [(Path(output_root), ('.image-vote-',)),
+            (Path(data_root) / 'temp', ('image-vote-download-',))]

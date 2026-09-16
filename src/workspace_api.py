@@ -2,12 +2,12 @@
 import asyncio
 import base64
 import json
-import tempfile
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
 from .path_guard import PathGuard
+from .maintenance import owned_temporary_directory
 from .report_generator import PLUGIN_NAME, REPORT_MARKER
 from .workspace_service import ConfigConflict, WorkspaceService
 
@@ -181,7 +181,7 @@ class WorkspaceAPI:
                     await asyncio.to_thread(handle.close)
             return self.web.stream_response(stream_file(), content_type='text/html', headers={
                 'Content-Disposition': "attachment; filename*=UTF-8''"+quote(path.name+'.html')})
-        temporary = tempfile.TemporaryDirectory(prefix='image-vote-download-')
+        temporary = owned_temporary_directory(Path(self.plugin.store.database_path).parent / 'temp', 'image-vote-download-')
         archive = Path(temporary.name)/'report.zip'
         def pack():
             guard = PathGuard(path)

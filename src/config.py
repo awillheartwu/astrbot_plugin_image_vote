@@ -40,7 +40,7 @@ DEFAULT_CONFIG = {
     "ai_top_n": 5,
     "ai_bottom_n": 3,
     "auto_resume_after_restart": False,
-    "auto_cleanup_reports": True,
+    "auto_cleanup_reports": False,
     "report_retention_days": 30,
     "avatar_cache_retention_days": 30,
     "max_send_retries": 3,
@@ -99,7 +99,7 @@ class VoteConfig:
     ai_top_n: int = 5
     ai_bottom_n: int = 3
     auto_resume_after_restart: bool = False
-    auto_cleanup_reports: bool = True
+    auto_cleanup_reports: bool = False
     report_retention_days: int = 30
     avatar_cache_retention_days: int = 30
     max_send_retries: int = 3

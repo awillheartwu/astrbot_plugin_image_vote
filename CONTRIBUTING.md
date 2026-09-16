@@ -8,3 +8,4 @@
 - 浏览器验证：`npm install --prefix /tmp/lirating-ui playwright`，然后 `NODE_PATH=/tmp/lirating-ui/node_modules node tools/check_panel_ui.cjs` 和 `node tools/check_report_ui.cjs`（第二条也需同一个 NODE_PATH）。脚本使用已安装的 Chrome，不需要下载浏览器。两套检查均默认不截图。
 - 不把单元测试、隔离 HTTP 验收等同于真实 QQ 或生产验收。修改与验证范围必须写明。
 - 发布执行 [发布流程](docs/RELEASE.md)，没有启用 CI，发布者负责运行检查并保存输出。
+- NAS 部署：`ASTRBOT_PASSWORD=... tools/deploy_nas.sh [ref]` 完成 bundle、`merge --ff-only`、面板重载与日志核对；默认部署当前分支，属独立授权动作，不由 git push 触发。

@@ -439,6 +439,42 @@ small {
   font-size: 13px;
   color: var(--muted);
 }
+.toolbar .toolbar-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 30px 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+/* 纯 CSS 下拉箭头：跟随主题色，pointer-events 关闭让点击落到 select 上。 */
+.toolbar .toolbar-field::after {
+  content: "";
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-65%) rotate(45deg);
+  opacity: .7;
+  pointer-events: none;
+}
+.toolbar .toolbar-field select {
+  border: 0;
+  background: transparent;
+  padding: 10px 4px 10px 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.toolbar .toolbar-field select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .toolbar .count {
   margin-left: auto;
   color: var(--muted);
@@ -1077,9 +1113,20 @@ dialog.lightbox img {
   .toolbar label {
     font-size: 12px;
   }
-  .toolbar .count {
+  .toolbar .toolbar-field {
+    flex: 1 1 46%;
+  }
+  .toolbar .toolbar-field select {
     width: 100%;
-    margin: 0;
+  }
+  .toolbar .count {
+    width: auto;
+    margin: 0 0 0 auto;
+    text-align: right;
+  }
+  /* 视图切换与计数并排，少占一行。 */
+  .toolbar .view-controls {
+    flex: 0 0 auto;
   }
   .surface {
     padding: 18px;

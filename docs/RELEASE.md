@@ -13,7 +13,8 @@
 7. 显式分别推送 main、dev 和本次标签到 GitHub、Forgejo；不要使用 `--tags` 或强推。两个远端不是原子事务，一端失败时记录成功端并仅补推失败端。
 8. 分别使用 `git ls-remote <仓库> refs/heads/main refs/heads/dev 'refs/tags/v<版本>^{}'` 确认两端指向本次发布提交。
 9. 发布者注册 AstrBot Cloud，并用 GitHub 仓库地址提交插件市场。NAS 部署独立授权执行，不由 git push 隐式触发。
-10. 返回 dev 继续后续开发。发现已发布问题时追加修复提交和新版本，不移动已发布标签。
+10. NAS 部署走 `tools/deploy_nas.sh`（bundle + `merge --ff-only` + 重载 + 日志核对）；脚本默认部署当前分支，可用 `REF=main tools/deploy_nas.sh` 指定，重载需要环境变量 `ASTRBOT_PASSWORD`。部署仍属独立授权动作，不由 git push 触发。
+11. 返回 dev 继续后续开发。发现已发布问题时追加修复提交和新版本，不移动已发布标签。
 
 ## 分发内容
 

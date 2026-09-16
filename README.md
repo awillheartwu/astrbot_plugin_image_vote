@@ -102,11 +102,16 @@ volumes:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v
+
+# 报告页 / 面板页的浏览器检查（需要 Playwright 与 Chrome，二选一安装 playwright-core 即可）
+npm install --prefix /tmp/pwcheck playwright-core
+NODE_PATH=/tmp/pwcheck/node_modules node tools/check_report_ui.cjs
+NODE_PATH=/tmp/pwcheck/node_modules node tools/check_panel_ui.cjs --shots /tmp/panel-shots
 ```
 
 核心逻辑不依赖 AstrBot，本地没有 AstrBot 和 Pillow 也能跑测试。
 
-- `docs/ARCHITECTURE.md` 分层说明与 AstrBot 4.27.5 实测的 API 事实
+- `docs/ARCHITECTURE.md` 分层说明，以及 AstrBot 4.27.5 / 4.28.0 实测的 API 事实
 - `docs/ROADMAP.md` 尚未完成的条目与后续需求
 - `docs/REQUIREMENTS.md` 需求原文
 - `tools/astrbot_api_probe.py`、`tools/probe_plugin/` 现场兼容性探针
@@ -124,14 +129,14 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v
 
 - **运行**：从已连接的 OneBot 群选择目标，预检后启动；暂停、继续、提前结束或取消。
 - **项目**：登记容器内目录、编辑项目覆盖参数、预览图片；目录浏览限于输入根、登记目录及 `web_browse_roots`。取消登记不会删除原图。
-- **历史与报告**：查看场次与报告状态，预览、下载、重新生成和清理。目录报告下载完整 ZIP，单文件报告下载 HTML。
+- **历史与报告**：查看场次与报告状态，下载、重新生成和清理。目录报告下载完整 ZIP，单文件报告下载 HTML。
 - **设置**：分组与搜索，修改后明确保存；配置仍写入同一份 AstrBotConfig。发现其他页面修改会拒绝覆盖，保留当前草稿。
 
 新版报告有「概览 / 全部图片 / 按参与者查看」：概览和分值分布以人物为单位，全部图片按人物成组，参与者页只列每个人物的一张最终票。报告不需要后台或 CDN；目录版请保留整个目录，单文件版可以独立打开。
 
 `ai_prompt_template` 默认填入完整提示词，可直接编辑或恢复默认，支持 `{project_name}`、`{statistics}`、`{top_n}`、`{bottom_n}`、`{score_min}`、`{score_max}`。普通导出复用已有 AI 摘要，只有 `/vote export --ai` 或网页勾选重新生成时才再次调用模型。AI 只接收统计，不接收整批图片。
 
-本轮网页按 AstrBot **v4.27.5** 官方接口实现，并进行了本地隔离验收；不代表已部署到你的实际实例。复现命令、完整验证范围和限制见 [实现与验收记录](docs/IMPLEMENTATION_STATUS.md)。
+本轮网页按 AstrBot v4.27.5 官方接口实现，并已在 **AstrBot 4.28.0 + NapCat** 的真实实例上跑通完整场次（发送、计票、报告生成与下载）。复现命令、完整验证范围和限制见 [实现与验收记录](docs/IMPLEMENTATION_STATUS.md)。
 
 ### 报告浏览与 AI 数据观察
 
@@ -143,6 +148,6 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v
 
 默认 `report_image_policy=character_cover`：每个人物首张成功展示图片保留高清派生图（无成功图片时取首张），其余图片仅保留缩略图；设置为 `all` 可恢复每张高清。原图始终不修改。高清默认 WebP、1920×1920 内、质量 82；缩略图宽 480、质量 72。质量参数不是固定文件压缩比例。
 
-单文件报告及管理页预览使用共享图片资源池，相同图片内容只内嵌一次，页面多处复用；Base64 本身约增加三分之一体积。单文件报告禁用 JavaScript 时保留统计文本，浏览内嵌图片需启用 JavaScript。目录报告继续用文件路径复用图片。
+单文件报告与管理页下载共用同一份资源池，相同图片内容只内嵌一次，页面多处复用；Base64 本身约增加三分之一体积。单文件报告禁用 JavaScript 时保留统计文本，浏览内嵌图片需启用 JavaScript。目录报告继续用文件路径复用图片。
 
 三张本地示例插画的实测主图约 190–211 KB、缩略图约 25–30 KB；两个人物三张图的单文件示例由 1.88 MB 降至 0.73 MB。按这些样本估算，100 张不同图片、20 个人物，精简单文件的图片载荷约 8.9 MB，另加页面、统计与头像；实际照片 / 截图复杂度不同，需用真实项目重导出确认。

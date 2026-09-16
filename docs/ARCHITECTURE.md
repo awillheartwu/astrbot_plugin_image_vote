@@ -1,5 +1,7 @@
 # 首轮架构与接力说明
 
+> 2026-09-16 注：本文记录首轮架构决策，分层与边界仍然有效；其中的版本事实与「下一步」已更新。当前版本与验收状态以 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 为准。
+
 ## 目标
 
 本轮先建立一个不依赖 AstrBot 的可测试核心，避免 OneBot Reply、消息链和版本差异污染投票业务。当前已继续接入可暂停轮播、群消息投票、重启后暂停恢复、目录报告导出和安全清理；`main.py` 仍只负责生命周期、装配和边缘事件。
@@ -52,9 +54,9 @@ SQLite 表为 `sessions`、`candidates`、`votes`。
 `reply_resolver.py` 只接收 `ReplyPayload`，不导入 OneBot 类型：
 
 1. 适配器把 `Reply.chain` / `Reply.message_str` 和可选 `message_id` 归一化到 `ReplyPayload`。
-2. 先匹配展示标记 `[投票 003/126 · A7F3]`，同时兼容内部标记 `[VOTE:A7F3:3]`。
+2. 展示标记同时接受 `【投票 012/045 · A7F3】` 与旧的 `[投票 003/126 · A7F3]`；解析扫描整段文本，因此标记落在消息末行也能命中，另兼容内部标记 `[VOTE:A7F3:3]`。
 3. `ReplyResolver` 校验 session short ID，再通过 display index 查当前快照候选。
-4. 适配器无法提供引用文本时，可在 OneBot 边界用 message ID 回查，再重新生成 `ReplyPayload`。
+4. AstrBot 的 aiocqhttp 适配器收到 `reply` 段时会用 `get_msg` 取回被引用消息的完整原文再构造 `Reply`（v4.27.5 与 v4.28.0 行为一致），插件侧无需自行回查。
 5. 解析成功后读取图片所属人物；任何解析失败都返回 `None`，不会把引用票错误地记到当前人物。
 
 ## 报告数据口径
@@ -63,7 +65,7 @@ SQLite 表为 `sessions`、`candidates`、`votes`。
 
 ## 目标实例已确认的事实（2026-09-11 现场探针）
 
-目标环境是 Portainer 里的 AstrBot（`soulter/astrbot:latest`）＋ NapCat 组合，实测版本 **AstrBot 4.27.5 / Python 3.12.14 / Pillow 12.3.0**，比需求文档里假定的 4.4.x 新得多。
+目标环境是 Portainer 里的 AstrBot（`soulter/astrbot:latest`）＋ NapCat 组合，当时实测版本 **AstrBot 4.27.5 / Python 3.12.14 / Pillow 12.3.0**；2026-09-15 起目标实例升级到 **AstrBot 4.28.0**，并在其上完成完整场次验收，比需求文档里假定的 4.4.x 新得多。
 
 - 挂载：宿主 data 目录（示例 `/mnt/docker/astrbot/data`）→ 容器 `/AstrBot/data`（读写）。插件目录 `/AstrBot/data/plugins`，插件数据目录必须用 `StarTools.get_data_dir("astrbot_plugin_image_vote")`，实测返回 `/AstrBot/data/plugin_data/astrbot_plugin_image_vote`。
 - 发送：`MessageChain().message(text).file_image(path)` 存在；`Context.send_message(session, message_chain) -> bool`，返回 False 表示会话无法解析。
@@ -72,14 +74,16 @@ SQLite 表为 `sessions`、`candidates`、`votes`。
 - LLM 默认响应：AstrBot 的 `star_request` 处理管线会自行调用 `event.stop_event()`，命令不需要额外关闭默认 LLM 响应。
 - 所有 AstrBot import 仍集中在 `astrbot_compat.py`；本地无 AstrBot 时仍可导入和跑测试，但一旦检测到 AstrBot 却找不到 `EventMessageType`，插件会在装配阶段直接抛错，避免静默失效。
 
-仍未确认：`filter` / `EventMessageType` 的具体来源路径、`Reply` 组件的字段（需要在真实群里引用一条机器人消息触发探针）、`Context.llm_generate` 与 `get_current_chat_provider_id` 的签名。
+上述「仍未确认」项均已在后续真机运行中确认：`filter` / `EventMessageType` 由 `astrbot.api.event.filter` 提供；`Reply` 组件带完整 `chain` 与 `message_str`；`Context.llm_generate(chat_provider_id=…, prompt=…)` 与 `get_current_chat_provider_id(umo)` 按本文接线方式工作。唯一要留意的边界：引用文本偶尔会带上平台拼进的 `@昵称(qq)` 片段，解析层会先剥离。
 
-## 下一步接力顺序
+## 当前状态与后续（2026-09-16）
 
-已完成并真机验证：引用消息的 `Reply` 结构（无需 OneBot `get_msg` 回查）、`Context.llm_generate` 与 `get_current_chat_provider_id` 接线、19 张图小项目的完整轮播与报告生成、Pillow 派生图。
+架构里列出的能力都已落地并在真机验证：人物口径发送与计票、引用投票（`Reply` 带完整原文）、`Context.llm_generate` 与 `get_current_chat_provider_id` 接线、合并发送与拆条、目录与单文件报告、插件工作区四个页面，以及报告与面板的浏览器检查工具。
 
-接下来：
+接下来值得做的：
 
-1. 补齐验收缺口：多群并行互不影响、跨进程重启恢复、500 MB 级项目的内存表现。插件重载路径已回归验证为 `PAUSED` 可续跑。
-2. 按 `docs/ROADMAP.md` 的批次推进：项目注册表 → 投票明细与按人分析 → 头像 → 报告页面重构，之后是管理页面。
-3. 单元测试不能替代 Reply 与发送链路验收；验收前不要把 `input_root` 指向真实的大项目。
+1. 插件市场发布收尾：仓库地址、`logo.png`、`tags` 已就绪，剩下按官方流程打包提交。
+2. 补齐验收缺口：多群并行、跨进程重启、500 MB 真实照片、单文件 `file://` 双击。
+3. 报告重新导出仍是一次一场；若以后要批量导出，属于新增功能，不是兼容需求。
+
+注意：单元测试不能替代 Reply 与发送链路验收；验收前不要把 `input_root` 指向真实的大项目。正式上线前会清空旧测试数据，因此不需要为旧报告或旧配置做兼容。

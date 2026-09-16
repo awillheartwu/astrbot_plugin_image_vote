@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.13.11 - 2026-09-16
+
+- 管理页移除报告预览：历史表格不再有「预览」按钮，只保留下载（单文件 HTML / 目录 ZIP），后端同时删掉 `reports/preview` 接口与内联预览实现。
+- 清理管理页 111 条报告页遗留 CSS（约 535 行），`pages/image-vote/style.css` 从 1320 行降到 763 行；删除前后 27 组面板截图逐字节一致，渲染无变化。
+- 窄屏修正：640px 以下历史表格给表格最小宽度、由容器横向滚动，列不再被压成竖排；页面内按钮最小点按高度统一到 40px。
+- 新增 `tools/check_panel_ui.cjs`：390/768/1440 × 运行/项目/历史/设置 × 正常/空态/断连共 27 组的布局与脚本检查，支持 `--shots` 输出截图；报告侧继续用 `tools/check_report_ui.cjs`。
+- 元数据补齐：`metadata.yaml` 增加 `tags`，仓库根新增 256×256 `logo.png`，具备提交 AstrBot 插件市场的字段。
+- 文档对齐到当前版本：`IMPLEMENTATION_STATUS.md` 重写（140 项测试、两个浏览器检查、真机 AstrBot 4.28.0 场次、未验收项），`ARCHITECTURE.md` 修正 Reply / get_msg 事实与「下一步」，`ROADMAP.md` 标注为历史路线图，`AGENT_CONTEXT.md` 同步到 0.13.11。
+- 删除已无引用的 `templates/report.html.j2`。
+
 ## 0.13.10 - 2026-09-16
 
 - 柱状图按卡片可用宽度重算横坐标，固定绘图区高度与字号，消除宽卡片中央的大面积留白。

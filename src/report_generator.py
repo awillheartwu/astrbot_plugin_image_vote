@@ -21,6 +21,7 @@ from .character_service import character_of
 from .logging_utils import get_logger
 from .models import Candidate, Session, SessionStatistics, Vote, status_label
 from .report_data import enrich_report
+from .ai_summary_service import summary_text
 from .path_guard import PathGuard, UnsafePathError
 from .report_activity import ReportBusyError
 
@@ -351,7 +352,7 @@ class DirectoryReportGenerator:
                     html.escape(str(row["source_filename"])),
                 )
             )
-        summary = payload.get("ai_summary") or "未启用 AI 总结，以上为纯统计结果。"
+        summary = summary_text(payload.get("ai_summary")) or "未启用 AI 总结，以上为纯统计结果。"
         embedded = json.dumps(payload, ensure_ascii=False).replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
         return """<!doctype html>
 <html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">

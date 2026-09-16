@@ -11,7 +11,7 @@
   const byImage = new Map(rows.map((row) => [row.candidate_id, row]));
   const byCharacter = new Map(characters.map((item) => [item.character, item]));
   const imagesFor = (character) => (character.candidate_ids || []).map((id) => byImage.get(id)).filter(Boolean);
-  let page = "overview", query = "", selectedPerson = people[0]?.id, personQuery = "", personSort = "high";
+  let page = "overview", query = "", selectedPerson = people[0]?.id, personQuery = "", personSort = "high", galleryView = "cards", gallerySort = "original", galleryFilter = "all";
   const expanded = new Set();
   const ordered = [...characters].sort((a,b) => (a.rank ?? Infinity) - (b.rank ?? Infinity));
   const avg = (v) => v == null ? "暂无评分" : Number(v).toFixed(2);
@@ -27,6 +27,10 @@
     Object.entries(c.score_distribution || {}).forEach(([key, value]) => counts[key] = (counts[key] || 0) + Number(value));
     return counts;
   }, {});
+  const highMin = Number(s.score_max) > Number(s.score_min) ? Math.round((Number(s.score_min) + .8 * (Number(s.score_max)-Number(s.score_min))) * 100) / 100 : null;
+  const isHigh = value => value != null && highMin != null && Number(value) >= highMin;
+  const scoreClass = value => isHigh(value) ? "score-high" : "";
+  const highLegend = () => highMin == null ? "" : `<p class="score-legend"><span aria-hidden="true"></span>金色：高分 ${highMin}–${s.score_max} 分（评分区间的上 20%）</p>`;
   function metric(value, label, tone = "violet") {
     return `<div class="metric-card tone-${tone}"><span class="metric-label">${label}</span><b>${value}</b><i aria-hidden="true"></i></div>`;
   }
@@ -37,7 +41,7 @@
       const end=Math.min(max,start+step-1);
       let count=0;
       for(let n=start;n<=end;n++) count+=Number(counts[n] || 0);
-      bins.push({label:start===end?`${start}`:`${start}–${end}`,count});
+      bins.push({label:start===end?`${start}`:`${start}–${end}`,count, high:isHigh(start)});
     }
     const peak=Math.max(3,Math.ceil(Math.max(0,...bins.map(b=>b.count))/3)*3);
     const plot={x:32,y:20,w:292,h:130}, cell=plot.w/bins.length;
@@ -47,8 +51,8 @@
     }).join("");
     return `<div class="chart histogram"><svg viewBox="0 0 340 186" role="img" aria-label="${esc(title)}，横轴为分数，纵轴为票数"><title>${esc(title)}</title>${grids}${bins.map((b,i)=>{
       const h=b.count/peak*plot.h,x=plot.x+i*cell+cell*.2,y=plot.y+plot.h-h;
-      return `<g tabindex="0" role="img" aria-label="${b.label}分：${b.count}票"><title>${b.label}分：${b.count}票</title><rect class="chart-bar" x="${x}" y="${y}" width="${cell*.6}" height="${h}" rx="3"/><text class="chart-value" x="${x+cell*.3}" y="${y-5}" text-anchor="middle">${b.count || ""}</text><text x="${x+cell*.3}" y="170" text-anchor="middle">${b.label}</text></g>`;
-    }).join("")}</svg><details class="chart-data"><summary>查看分布数据</summary><div>${bins.map(b=>`<span>${b.label}分 <b>${b.count}票</b></span>`).join("")}</div></details></div>`;
+      return `<g tabindex="0" role="img" aria-label="${b.label}分：${b.count}票"><title>${b.label}分：${b.count}票</title><rect class="chart-bar ${b.high ? "chart-high" : ""}" x="${x}" y="${y}" width="${cell*.6}" height="${h}" rx="3"/><text class="chart-value" x="${x+cell*.3}" y="${y-5}" text-anchor="middle">${b.count || ""}</text><text x="${x+cell*.3}" y="170" text-anchor="middle">${b.label}</text></g>`;
+    }).join("")}</svg>${highLegend()}<details class="chart-data"><summary>查看分布数据</summary><div>${bins.map(b=>`<span>${b.label}分 <b>${b.count}票</b></span>`).join("")}</div></details></div>`;
   }
   function ring(value, label, detail) {
     const available=value!=null && Number.isFinite(Number(value));
@@ -79,7 +83,8 @@
   }
   function header() {
     const navigation = [["overview","概览"],["images","全部图片"],...(d.participant_details_available ? [["people","按参与者查看"]] : [])];
-    const cover = rows.find(row => row.send_status === "sent");
+    const leader = ordered.find(c => c.vote_count > 0 && coverFor(c));
+    const cover = leader ? coverFor(leader) : rows.find(row => row.send_status === "sent") || rows[0];
     return `<header class="report-header"><span class="brand">LIRATING <small>人物投票报告</small></span><button data-action="theme" class="quiet">切换主题</button></header><section class="report-intro ${page === "overview" ? "with-cover" : "compact"}">${cover ? `<div class="report-intro-cover" aria-hidden="true">${image(cover,true)}</div>` : ""}<div class="intro-content"><div class="eyebrow">CHARACTER VOTING JOURNAL</div><h1>${esc(s.project_name)} <span class="badge">${esc(s.status_label || s.status || "")}</span></h1><p>按人物汇总评分，记录每一次选择。</p><div class="report-meta"><span># ${esc(s.short_id || "—")}</span><span>${stats.unique_voters ?? 0} 位参与者</span><span>${characters.length} 个人物</span><span>${s.score_min}–${s.score_max} 分制</span><span>${esc(formatTime(s.finished_at || s.started_at))}</span>${metrics.partial ? '<span class="badge neutral">图片未全部展示</span>' : ""}</div></div></section><nav class="report-view-nav" aria-label="报告导航">${navigation.map(([key,label]) => `<button data-page="${key}" ${page === key ? 'aria-current="page"' : ""} class="${page === key ? "active" : ""}">${label}${key === "images" ? ` <span>${rows.length}</span>` : ""}</button>`).join("")}</nav>`;
   }
   function characterBadge(character) {
@@ -89,33 +94,46 @@
   }
   function characterCard(c) {
     const cover=coverFor(c);
-    return `<article class="character-card podium-card"><div class="podium-media">${cover?`<button class="character-cover" data-image="${esc(cover.candidate_id)}" aria-label="查看 ${esc(c.character)} 的封面">${image(cover,true)}</button>`:'<div class="image-error">无图片</div>'}<span class="rank-medal rank-${c.rank}" aria-label="排名 ${c.rank}">${c.rank}</span></div><div class="podium-caption"><button data-character="${esc(c.character)}" class="text-link">${esc(c.character)}</button><div><strong>${avg(c.average_score)}<small> / ${s.score_max}</small></strong><span>${c.vote_count} 票</span></div>${characterBadge(c)}</div></article>`;
+    return `<article class="character-card podium-card"><div class="podium-media">${cover?`<button class="character-cover" data-image="${esc(cover.candidate_id)}" aria-label="查看 ${esc(c.character)} 的封面">${image(cover,true)}</button>`:'<div class="image-error">无图片</div>'}<span class="rank-medal rank-${c.rank}" aria-label="排名 ${c.rank}">${c.rank}</span></div><div class="podium-caption"><button data-character="${esc(c.character)}" class="text-link">${esc(c.character)}</button><div><strong class="${scoreClass(c.average_score)}">${avg(c.average_score)}<small> / ${s.score_max}</small></strong><span>${c.vote_count} 票</span></div>${characterBadge(c)}</div></article>`;
   }
   function rankingTable() {
     return `<section id="full-ranking" class="surface"><div class="section-title"><div><span class="eyebrow">THE FULL RANKING</span><h2>完整人物排名</h2></div><span class="badge neutral">${characters.length} 个人物</span></div><div class="table-wrap"><table><caption class="sr-only">本轮全部人物最终排名</caption><thead><tr><th scope="col">排名</th><th scope="col">人物</th><th scope="col">均分</th><th scope="col">票数</th><th scope="col">获票覆盖</th></tr></thead><tbody>${ordered.map(c=>{
       const cover=coverFor(c),coverage=c.coverage==null?null:Math.max(0,Math.min(1,c.coverage));
-      return `<tr><td><span class="table-rank rank-${c.rank}">${c.rank ?? "—"}</span></td><td><div class="rank-identity">${cover?image(cover):""}<div><button class="text-link ranking-name" data-character="${esc(c.character)}">${esc(c.character)}</button>${characterBadge(c)}</div></div></td><td class="num score-cell">${avg(c.average_score)}</td><td>${c.vote_count}</td><td><div class="coverage-track"><i style="width:${(coverage || 0)*100}%"></i></div><small>${pct(coverage)}</small></td></tr>`;
+      return `<tr><td><span class="table-rank rank-${c.rank}">${c.rank ?? "—"}</span></td><td><div class="rank-identity">${cover?image(cover):""}<div><button class="text-link ranking-name" data-character="${esc(c.character)}">${esc(c.character)}</button>${characterBadge(c)}</div></div></td><td class="num score-cell ${scoreClass(c.average_score)}">${avg(c.average_score)}</td><td>${c.vote_count}</td><td><div class="coverage-track"><i style="width:${(coverage || 0)*100}%"></i></div><small>${pct(coverage)}</small></td></tr>`;
     }).join("") || '<tr><td colspan="5">暂无人物</td></tr>'}</tbody></table></div><p class="panel-footnote">按均分、票数、人物首次出现顺序排列。获票覆盖 = 人物票数 / 本轮参与者人数；无评分不参与排名。</p></section>`;
+  }
+  function aiPanel() {
+    const leader=ordered.find(c=>c.vote_count>0);
+    const unrated=characters.filter(c=>!c.vote_count && imagesFor(c).some(r=>r.send_status==="sent")).length;
+    const digest=[leader ? `${leader.character} 位列第一，均分 ${avg(leader.average_score)}，共 ${leader.vote_count} 票。` : "本轮暂无有效人物评分。", `共有 ${unrated} 个人物已展示但暂无评分。`];
+    if ((stats.unique_voters || 0)===1) digest.push("本轮只有一位参与者，结果反映个人评分。");
+    const analysis=d.ai_analysis;
+    const structured=analysis && typeof analysis.headline==="string" && Array.isArray(analysis.insights) && analysis.insights.every(i=>typeof i.title==="string" && typeof i.text==="string");
+    return `<section class="surface ai-panel"><div class="panel-heading"><span class="eyebrow">INSIGHTS & NOTES</span><h2>本轮速览</h2></div><ul class="report-digest">${digest.map(t=>`<li>${esc(t)}</li>`).join("")}</ul>${structured ? `<h3 class="ai-headline">${esc(analysis.headline)}</h3><details class="ai-expanded"><summary>展开 AI 数据观察 · ${analysis.insights.length} 条</summary>${analysis.insights.map(i=>`<article><h3>${esc(i.title)}</h3><p>${esc(i.text)}</p></article>`).join("")}${analysis.closing?`<p class="muted">${esc(analysis.closing)}</p>`:""}</details>` : d.ai_summary ? `<details class="ai-expanded"><summary>展开 AI 完整解读</summary><p class="ai-copy">${esc(d.ai_summary)}</p></details>` : '<p class="muted">本报告未附带 AI 解读。</p>'}${d.ai_summary?'<small>AI 仅依据统计生成，仅供参考。</small>':""}<div class="insight-signature">LIRATING <span>每一次选择，都有迹可循。</span></div></section>`;
   }
   function overview() {
     const featured = ordered.filter(c=>c.vote_count).slice(0,3);
     const count=Object.values(totalCounts).reduce((sum,n)=>sum+n,0);
     const mean=count?Object.entries(totalCounts).reduce((sum,[n,c])=>sum+Number(n)*c,0)/count:null;
-    return `<div class="report-metrics">${metric(characters.length,"人物数量")}${metric(stats.unique_voters ?? 0,"参与者","blue")}${metric(stats.total_valid_votes ?? 0,"有效人物票","green")}${metric(avg(mean),`平均分 / ${s.score_max}`)}${metric(`${metrics.sent_count ?? 0} / ${rows.length}`,"图片已展示","blue")}</div>${stats.unique_voters === 1 ? '<p class="notice">本轮仅 1 位参与者，排名反映个人评分，不代表群体共识。</p>' : ""}<div class="overview-top"><section class="surface podium-panel"><div class="section-title"><div><span class="eyebrow">HIGHEST RATED</span><h2>高分人物 <small>TOP ${featured.length}</small></h2></div><a class="text-link" href="#full-ranking">完整排名 →</a></div>${featured.length?`<div class="character-ranking">${featured.map(characterCard).join("")}</div>`:'<div class="empty">本轮尚无有效评分，图片可在「全部图片」中浏览。</div>'}</section><section class="surface distribution-panel"><div class="panel-heading"><span class="eyebrow">SCORE DISTRIBUTION</span><h2>总体分值分布</h2></div>${histogram(totalCounts)}<p class="panel-footnote">每张最终人物票计入一次 · 共 ${count} 票</p></section>${coveragePanel()}</div><div class="overview-bottom"><section class="surface ai-panel"><div class="panel-heading"><span class="eyebrow">INSIGHTS & NOTES</span><h2>${d.ai_summary?"AI 统计解读":"本轮统计说明"}</h2></div>${d.ai_summary?`<p class="ai-copy">${esc(d.ai_summary)}</p><small>根据本轮统计自动生成，仅供参考。</small>`:'<p class="ai-copy">每位参与者对每个人物只保留一张最终票。同一人物的多张图片共同作为评分参考，不单独计票或排名。</p><p class="muted">本报告未附带 AI 解读。</p>'}<div class="insight-signature">LIRATING <span>每一次选择，都有迹可循。</span></div></section>${rankingTable()}</div>`;
+    return `<div class="report-metrics">${metric(characters.length,"人物数量")}${metric(stats.unique_voters ?? 0,"参与者","blue")}${metric(stats.total_valid_votes ?? 0,"有效人物票","green")}${metric(avg(mean),`平均分 / ${s.score_max}`)}${metric(`${metrics.sent_count ?? 0} / ${rows.length}`,"图片已展示","blue")}</div>${stats.unique_voters === 1 ? '<p class="notice">本轮仅 1 位参与者，排名反映个人评分，不代表群体共识。</p>' : ""}<div class="overview-top"><section class="surface podium-panel"><div class="section-title"><div><span class="eyebrow">HIGHEST RATED</span><h2>高分人物 <small>TOP ${featured.length}</small></h2></div><a class="text-link" href="#full-ranking">完整排名 →</a></div>${featured.length?`<div class="character-ranking">${featured.map(characterCard).join("")}</div>`:'<div class="empty">本轮尚无有效评分，图片可在「全部图片」中浏览。</div>'}</section><section class="surface distribution-panel"><div class="panel-heading"><span class="eyebrow">SCORE DISTRIBUTION</span><h2>总体分值分布</h2></div>${histogram(totalCounts)}<p class="panel-footnote">每张最终人物票计入一次 · 共 ${count} 票</p></section>${coveragePanel()}</div><div class="overview-bottom">${aiPanel()}${rankingTable()}</div>`;
   }
   function imageTile(row) {
     return `<button data-image="${esc(row.candidate_id)}">${image(row)}<h3>${esc(row.display_title)}</h3><small>#${row.display_index} · ${row.send_status === "sent" ? "已展示" : row.send_status === "send_failed" ? "发送失败" : "未展示"}</small></button>`;
   }
+  function galleryList(filtered) {
+    return `<div class="table-wrap gallery-list"><table><caption class="sr-only">人物列表，点击查看人物图片及评分详情</caption><thead><tr><th scope="col">人物</th><th scope="col">排名</th><th scope="col">均分</th><th scope="col">票数</th><th scope="col">图片</th><th scope="col">详情</th></tr></thead><tbody>${filtered.map(c=>`<tr><td><div class="rank-identity">${coverFor(c)?image(coverFor(c)):""}<div><button class="text-link ranking-name" data-detail="${esc(c.character)}">${esc(c.character)}</button>${characterBadge(c)}</div></div></td><td>${c.rank ?? "—"}</td><td class="num ${scoreClass(c.average_score)}">${avg(c.average_score)}</td><td>${c.vote_count}</td><td>${imagesFor(c).length}</td><td><button class="text-link" data-detail="${esc(c.character)}" aria-label="查看 ${esc(c.character)} 详情">查看详情 →</button></td></tr>`).join("")}</tbody></table></div>`;
+  }
   function groupedImages() {
     const needle = query.toLowerCase();
-    const filtered = characters.filter((c) => c.character.toLowerCase().includes(needle) || imagesFor(c).some((r) => r.display_title.toLowerCase().includes(needle)));
-    return `<div class="library-summary"><span><b>${rows.length}</b> 张图片</span><span><b>${characters.length}</b> 个人物</span><span><b>${metrics.sent_count ?? 0}</b> 张已展示</span><p>图片是人物素材，不单独评分或排名。</p></div><div class="toolbar"><label class="sr-only" for="image-search">搜索人物或图片</label><input id="image-search" type="search" placeholder="搜索人物或图片" value="${esc(query)}"><span class="count" role="status">${filtered.length} / ${characters.length} 个人物</span></div><div class="character-library">${filtered.map(c => {
-      const all = imagesFor(c), open = expanded.has(c.character);
-      // A filename search must expose matching images even beyond the preview slice.
-      const pictures = needle && !c.character.toLowerCase().includes(needle) ? all.filter(r => r.display_title.toLowerCase().includes(needle)) : all;
-      const visible = open ? pictures : pictures.slice(0,3);
-      return `<section class="surface character-group"><div class="section-title"><div class="group-identity">${coverFor(c)?image(coverFor(c)):""}<div><h2>${esc(c.character)}</h2><span class="muted"><b class="accent">${score(c.average_score)}</b> · ${c.vote_count} 票 · ${all.length} 张图片</span></div></div>${characterBadge(c)}</div><div class="report-grid">${visible.map(imageTile).join("")}</div>${pictures.length > 3 ? `<button class="group-expand" data-expand="${esc(c.character)}" aria-expanded="${open}">${open ? "收起图片" : `查看全部 ${pictures.length} 张图片`}</button>` : ""}<details class="method"><summary>人物评分分布${d.participant_details_available ? "与参与者" : ""}</summary>${bars(c.score_distribution)}${d.participant_details_available ? `<div class="data-table">${votes.filter(v => v.character === c.character).sort((a,b) => b.score-a.score).map(v => { const person = people.find(p => p.id === v.participant_id); return person ? `<div class="person-row">${avatar(person)}<button class="text-link" data-person="${esc(person.id)}">${esc(person.name)}</button><span class="right">${v.score}分</span></div>` : ""; }).join("") || '<p class="muted">暂无评分</p>'}</div>` : ""}</details></section>`;
-    }).join("") || '<div class="empty">没有匹配的人物或图片</div>'}</div>`;
+    const filtered = characters.filter(c => (c.character.toLowerCase().includes(needle) || imagesFor(c).some(r => r.display_title.toLowerCase().includes(needle))) && (galleryFilter === "all" || (galleryFilter === "high" ? isHigh(c.average_score) : !c.vote_count)));
+    if (gallerySort === "score") filtered.sort((a,b)=>(a.rank ?? Infinity)-(b.rank ?? Infinity));
+    if (gallerySort === "name") filtered.sort((a,b)=>a.character.localeCompare(b.character,"zh-CN"));
+    const cards=()=>`<div class="character-library">${filtered.map(c => {
+      const all=imagesFor(c), open=expanded.has(c.character);
+      const pictures=needle && !c.character.toLowerCase().includes(needle)?all.filter(r=>r.display_title.toLowerCase().includes(needle)):all;
+      return `<section class="surface character-group"><div class="section-title"><div class="group-identity">${coverFor(c)?image(coverFor(c)):""}<div><h2><button class="text-link" data-detail="${esc(c.character)}">${esc(c.character)}</button></h2><span class="muted">#${c.rank ?? "—"} · <b class="${scoreClass(c.average_score)}">${score(c.average_score)}</b> · ${c.vote_count} 票 · ${all.length} 张图</span></div></div>${characterBadge(c)}</div><div class="report-grid">${(open?pictures:pictures.slice(0,3)).map(imageTile).join("")}</div><div class="group-actions">${pictures.length>3?`<button class="group-expand" data-expand="${esc(c.character)}" aria-expanded="${open}">${open?"收起图片":`全部 ${pictures.length} 张`}</button>`:""}<button class="text-link" data-detail="${esc(c.character)}">人物详情 →</button></div></section>`;
+    }).join("")}</div>`;
+    return `<div class="library-summary"><span><b>${rows.length}</b> 张图片</span><span><b>${characters.length}</b> 个人物</span><p>图片是人物素材，不单独评分或排名。</p></div><div class="toolbar gallery-toolbar"><label class="sr-only" for="image-search">搜索人物或图片</label><input id="image-search" type="search" placeholder="搜索人物或图片" value="${esc(query)}"><label for="gallery-filter">筛选</label><select id="gallery-filter">${[["all","全部人物"],["high","高分人物"],["unrated","暂无评分"]].map(([v,t])=>`<option value="${v}" ${galleryFilter===v?"selected":""}>${t}</option>`).join("")}</select><label for="gallery-sort">排序</label><select id="gallery-sort">${[["original","展示顺序"],["score","评分排名"],["name","人物名称"]].map(([v,t])=>`<option value="${v}" ${gallerySort===v?"selected":""}>${t}</option>`).join("")}</select><div class="view-controls" role="group" aria-label="浏览方式"><button data-view="cards" aria-pressed="${galleryView==="cards"}">图册</button><button data-view="list" aria-pressed="${galleryView==="list"}">列表</button></div><span class="count" role="status">${filtered.length} / ${characters.length} 个人物</span></div>${highLegend()}${filtered.length ? galleryView==="list"?galleryList(filtered):cards() : '<div class="empty">没有匹配的人物或图片</div>'}`;
   }
   function peopleMenu() {
     return people.filter((person) => person.name.toLowerCase().includes(personQuery.toLowerCase())).map((person) => `<button data-person="${esc(person.id)}" class="${selectedPerson === person.id ? "active" : ""}">${avatar(person)}<span>${esc(person.name)}<small>已给 ${person.vote_count} 位人物评分</small></span></button>`).join("") || '<p class="muted">未找到参与者</p>';
@@ -125,7 +143,7 @@
     if (!person) return '<div class="empty">暂无参与者明细</div>';
     const own = votes.filter(v => v.participant_id === person.id).sort((a,b) => personSort === "name" ? a.character.localeCompare(b.character, "zh-CN") : personSort === "low" ? a.score-b.score : b.score-a.score);
     const ownCounts=own.reduce((counts,v)=>{ counts[v.score]=(counts[v.score] || 0)+1; return counts; },{});
-    return `<div class="person-heading">${avatar(person)}<div><h2>${esc(person.name)}</h2><span class="muted">本轮最终人物评分</span></div></div><div class="report-metrics person-metrics">${metric(person.vote_count,"已评分人物","blue")}${metric(avg(person.average_score),"该参与者均分")}${metric(pct(person.coverage),"人物覆盖率","green")}</div><div class="person-charts"><section class="surface"><div class="panel-heading"><span class="eyebrow">PERSONAL SCORES</span><h2>个人评分分布</h2></div>${histogram(ownCounts,"个人评分分布")}</section><section class="surface"><div class="panel-heading"><span class="eyebrow">COVERAGE</span><h2>人物评分覆盖</h2></div>${ring(person.coverage,"人物覆盖率",`已给 <b>${person.vote_count}</b> 个人物评分<br>每个人物只计一张最终票`)}</section></div>${comparison(own)}<p class="report-note">覆盖率以至少成功展示一张图片的人物为分母。本轮均分包含该参与者的评分。</p><div class="toolbar"><label for="person-sort">评分排序</label><select id="person-sort">${[["high","评分从高到低"],["low","评分从低到高"],["name","人物名称"]].map(([value,label]) => `<option value="${value}" ${personSort === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="table-wrap"><table><caption class="sr-only">${esc(person.name)}的最终人物评分</caption><thead><tr><th scope="col">人物</th><th scope="col">个人评分</th><th scope="col">本轮均分</th><th scope="col">来源图片</th></tr></thead><tbody>${own.map(v => { const c = byCharacter.get(v.character), source = byImage.get(v.source_candidate_id); return `<tr><td><button class="text-link ranking-name" data-character="${esc(v.character)}">${esc(v.character)}</button></td><td class="num accent">${v.score}</td><td class="num">${avg(c?.average_score)}</td><td>${source ? `<button class="source-image" data-image="${esc(source.candidate_id)}">${image(source)}<span>${esc(source.display_title)}</span></button>` : '<span class="muted">来源图片不可用</span>'}</td></tr>`; }).join("") || '<tr><td colspan="4">暂无评分</td></tr>'}</tbody></table></div>`;
+    return `<div class="person-heading">${avatar(person)}<div><h2>${esc(person.name)}</h2><span class="muted">本轮最终人物评分</span></div></div><div class="report-metrics person-metrics">${metric(person.vote_count,"已评分人物","blue")}${metric(avg(person.average_score),"该参与者均分")}${metric(pct(person.coverage),"人物覆盖率","green")}</div><div class="person-charts"><section class="surface"><div class="panel-heading"><span class="eyebrow">PERSONAL SCORES</span><h2>个人评分分布</h2></div>${histogram(ownCounts,"个人评分分布")}</section><section class="surface"><div class="panel-heading"><span class="eyebrow">COVERAGE</span><h2>人物评分覆盖</h2></div>${ring(person.coverage,"人物覆盖率",`已给 <b>${person.vote_count}</b> 个人物评分<br>每个人物只计一张最终票`)}</section></div>${comparison(own)}<p class="report-note">覆盖率以至少成功展示一张图片的人物为分母。本轮均分包含该参与者的评分。</p><div class="toolbar"><label for="person-sort">评分排序</label><select id="person-sort">${[["high","评分从高到低"],["low","评分从低到高"],["name","人物名称"]].map(([value,label]) => `<option value="${value}" ${personSort === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="table-wrap"><table><caption class="sr-only">${esc(person.name)}的最终人物评分</caption><thead><tr><th scope="col">人物</th><th scope="col">个人评分</th><th scope="col">本轮均分</th><th scope="col">来源图片</th></tr></thead><tbody>${own.map(v => { const c = byCharacter.get(v.character), source = byImage.get(v.source_candidate_id); return `<tr><td><button class="text-link ranking-name" data-character="${esc(v.character)}">${esc(v.character)}</button></td><td class="num accent ${scoreClass(v.score)}">${v.score}</td><td class="num ${scoreClass(c?.average_score)}">${avg(c?.average_score)}</td><td>${source ? `<button class="source-image" data-image="${esc(source.candidate_id)}">${image(source)}<span>${esc(source.display_title)}</span></button>` : '<span class="muted">来源图片不可用</span>'}</td></tr>`; }).join("") || '<tr><td colspan="4">暂无评分</td></tr>'}</tbody></table></div>`;
   }
 
   function peoplePage() {
@@ -143,29 +161,56 @@
     if (replacement) { replacement.focus({preventScroll:true}); if (start != null && replacement.setSelectionRange) replacement.setSelectionRange(start,end); }
   }
   const dialog = document.createElement("dialog"); dialog.className = "report-modal"; document.body.appendChild(dialog);
-  root.addEventListener("click", (event) => {
+  function showDialog(content) {
+    dialog.innerHTML=content;
+    if (!dialog.open) dialog.showModal();
+    else dialog.querySelector("[data-close]")?.focus({preventScroll:true});
+  }
+  function openCharacter(name) {
+    const c=byCharacter.get(name); if(!c) return;
+    showDialog(`<div class="modal-head"><h2>${esc(name)}</h2><button data-close>关闭</button></div><p><strong class="${scoreClass(c.average_score)}">${score(c.average_score)}</strong> · ${c.vote_count} 票 · ${imagesFor(c).length} 张图片 ${characterBadge(c)}</p><div class="report-grid detail-gallery">${imagesFor(c).map(imageTile).join("")}</div><h3>人物评分分布</h3>${histogram(c.score_distribution || {})}${d.participant_details_available?`<h3>最终参与者评分</h3><div class="data-table">${votes.filter(v=>v.character===name).map(v=>{const person=people.find(p=>p.id===v.participant_id);return person?`<div class="person-row">${avatar(person)}<button class="text-link" data-person="${esc(person.id)}">${esc(person.name)}</button><span class="right ${scoreClass(v.score)}">${v.score} 分</span></div>`:"";}).join("") || '<p class="muted">暂无评分</p>'}</div>`:""}`);
+  }
+  function openImage(id) {
+    const row=byImage.get(id); if(!row) return;
+    const c=byCharacter.get(row.character), pictures=c?imagesFor(c):[row], index=pictures.indexOf(row);
+    showDialog(`<div class="modal-head"><h2>${esc(row.display_title)}</h2><button data-close>关闭</button></div>${image(row,true)}<div class="image-detail-nav"><button data-image="${esc(pictures[Math.max(0,index-1)].candidate_id)}" ${index<=0?"disabled":""}>上一张</button><span>${index+1} / ${pictures.length}</span><button data-image="${esc(pictures[Math.min(pictures.length-1,index+1)].candidate_id)}" ${index>=pictures.length-1?"disabled":""}>下一张</button></div><p>${esc(row.character)} · 原始文件 ${esc(row.source_filename)}</p><p class="muted">${row.send_status==="sent"?"已展示":row.send_status==="send_failed"?"发送失败":"未展示"}${c?` · 人物均分 ${score(c.average_score)}`:""}</p>${c?`<button class="text-link" data-detail="${esc(c.character)}">查看人物详情与评分</button>`:""}`);
+  }
+  function handleClick(event) {
+    const detailButton=event.target.closest("[data-detail]");
+    if(detailButton){openCharacter(detailButton.dataset.detail);return;}
+    const viewButton=event.target.closest("[data-view]");
+    if(viewButton){galleryView=viewButton.dataset.view;render();root.querySelector(`[data-view="${galleryView}"]`).focus({preventScroll:true});return;}
+    if(event.target.closest("[data-close]")){dialog.close();return;}
     const pageButton = event.target.closest("[data-page]");
     if (pageButton) { page = pageButton.dataset.page; render(); root.querySelector(`[data-page="${page}"]`).focus({preventScroll:true}); return; }
     const characterButton = event.target.closest("[data-character]");
-    if (characterButton) { query = characterButton.dataset.character; expanded.add(query); page = "images"; render(); document.getElementById("image-search").focus(); return; }
+    if (characterButton) { query = characterButton.dataset.character; galleryFilter = "all"; expanded.add(query); page = "images"; render(); document.getElementById("image-search").focus(); return; }
     const expandButton = event.target.closest("[data-expand]");
     if (expandButton) { const key = expandButton.dataset.expand; expanded.has(key) ? expanded.delete(key) : expanded.add(key); render(); return; }
     if (event.target.closest('[data-action="theme"]')) { document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; return; }
     const personButton = event.target.closest("[data-person]");
-    if (personButton) { selectedPerson = personButton.dataset.person; page = "people"; render(); root.querySelector(".people-menu .active")?.focus({preventScroll:true}); return; }
+    if (personButton) { selectedPerson = personButton.dataset.person; if(dialog.open) dialog.close(); page = "people"; render(); root.querySelector(".people-menu .active")?.focus({preventScroll:true}); return; }
     const imageButton = event.target.closest("[data-image]");
-    if (imageButton) { const row = byImage.get(imageButton.dataset.image); if (!row) return; dialog.innerHTML = `<div class="modal-head"><h2>${esc(row.display_title)}</h2><button data-close>关闭</button></div>${image(row, true)}<p>${esc(row.character)} · 原始文件 ${esc(row.source_filename)}</p>`; dialog.showModal(); }
-  });
+    if (imageButton) openImage(imageButton.dataset.image);
+  }
+  root.addEventListener("click", handleClick);
+  dialog.addEventListener("click", handleClick);
   root.addEventListener("input", (event) => {
     if (event.target.id === "image-search") { query = event.target.value; render(); }
     if (event.target.id === "people-search") { personQuery = event.target.value; render(); }
   });
-  root.addEventListener("change", (event) => { if (event.target.id === "person-sort") { personSort = event.target.value; render(); } });
+  root.addEventListener("change", (event) => {
+    const id=event.target.id;
+    if(id==="person-sort") personSort=event.target.value;
+    else if(id==="gallery-sort") gallerySort=event.target.value;
+    else if(id==="gallery-filter") galleryFilter=event.target.value;
+    else return;
+    render();
+  });
   document.addEventListener("error", (event) => {
     if (event.target.tagName === "IMG" && (root.contains(event.target) || dialog.contains(event.target))) {
       const fallback = document.createElement("span"); fallback.className = "image-error"; fallback.textContent = "图片不可用"; event.target.replaceWith(fallback);
     }
   }, true);
-  dialog.addEventListener("click", (event) => { if (event.target.closest("[data-close]")) dialog.close(); });
   render();
 })();

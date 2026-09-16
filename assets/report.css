@@ -1750,3 +1750,66 @@ th { background: var(--panel-top); }
   #full-ranking .table-wrap { max-height: none; }
   .chart text { fill: black; }
 }
+
+/* Reading hierarchy, light palette and score semantics. */
+:root { --score-high: #a66a08; --score-high-soft: #fff0cd; }
+:root[data-theme="dark"] { --score-high: #f0c66c; --score-high-soft: #3b3020; }
+:root:not([data-theme="dark"]) {
+  --bg: #f1eff8; --surface: #fff; --ink: #29253f; --muted: #656078;
+  --line: #d9d2ea; --accent: #7950bd; --soft: #e9e0f8;
+  --panel-top: #fff; --panel-bottom: #f5f0ff;
+  --hero-shade: #f1eff8; --hero-clear: #f1eff800;
+  --chart-accent: #8c69cc; --chart-secondary: #8295b1;
+}
+:root:not([data-theme="dark"]) #report-app .surface { box-shadow: 0 8px 24px #6f518710; }
+:root:not([data-theme="dark"]) .metric-card { background: radial-gradient(ellipse at top right,#e4d5ff66,transparent 75%),linear-gradient(135deg,#fff,#f8f5ff); }
+:root:not([data-theme="dark"]) .report-view-nav { box-shadow: 0 5px 16px #71558c12; }
+:root:not([data-theme="dark"]) .report-intro-cover { opacity: .32; }
+.report-intro { min-height: 170px; padding-top: 28px; padding-bottom: 24px; }
+.report-intro.compact { min-height: 150px; padding-top: 20px; padding-bottom: 20px; }
+#report-app .eyebrow { opacity: .7; font-size: 9px; }
+.score-high, .podium-caption strong.score-high { color: var(--score-high); font-weight: 700; }
+.chart .chart-high { fill: var(--score-high); }
+.score-legend { font-size: 11px; color: var(--muted); margin: 10px 0 14px; }
+.score-legend > span { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--score-high); margin-right: 6px; }
+.character-ranking { grid-template-columns: 1.18fr 1fr 1fr; }
+.podium-card:first-child { border-color: var(--score-high); box-shadow: 0 4px 18px #a67e2518; }
+.table-rank.rank-2 { color: var(--chart-secondary); }
+.table-rank.rank-3 { color: #b77950; }
+.report-digest { padding-left: 20px; font-size: 14px; line-height: 1.9; }
+.report-digest li { padding-bottom: 8px; }
+.report-digest li::marker { color: var(--accent); }
+.ai-headline { font-size: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
+.ai-expanded { margin: 14px 0; font-size: 13px; }
+.ai-expanded summary { color: var(--accent); cursor: pointer; padding: 8px 0; }
+.ai-expanded article { padding: 12px 0; border-top: 1px solid var(--line); }
+.ai-expanded article h3 { font-size: 14px; }
+.ai-expanded article p { line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
+.insight-signature { margin-top: 16px; }
+.gallery-toolbar label { white-space: nowrap; }
+.view-controls button { padding: 7px 12px; font-size: 13px; }
+.view-controls button[aria-pressed="true"] { background: var(--soft); color: var(--accent); border-color: var(--accent); }
+.gallery-list table { min-width: 530px; }
+.gallery-list .rank-identity img { width: 44px; height: 50px; }
+.group-actions { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
+.group-actions .group-expand { width: auto; margin: 0; }
+.group-actions .text-link { font-size: 12px; margin-left: auto; }
+.group-identity h2 button { color: var(--ink); font-weight: 650; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.group-identity { align-items: flex-start; }
+.group-identity > img { width: 50px; height: 50px; flex-shrink: 0; }
+.report-modal .modal-head h2 { overflow-wrap: anywhere; min-width: 0; }
+.report-modal .modal-head { gap: 16px; }
+.report-modal .modal-head button { flex-shrink: 0; }
+.report-modal .detail-gallery { margin-bottom: 20px; }
+.report-modal .detail-gallery img { height: 150px; object-fit: contain; }
+.image-detail-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0; }
+.report-modal > p { overflow-wrap: anywhere; }
+.people-layout aside { position: sticky; top: 20px; max-height: 80vh; overflow-y: auto; }
+@media (max-width: 700px) {
+  .report-intro, .report-intro.compact { min-height: 150px; padding: 22px 0; }
+  .gallery-toolbar input { flex-basis: 100%; }
+  .people-layout aside { position: static; max-height: none; }
+  .report-modal .detail-gallery { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .character-ranking { grid-template-columns: repeat(3,minmax(0,1fr)); }
+}
+@media (max-width: 380px) { .character-ranking { grid-template-columns: minmax(0,1fr); } }

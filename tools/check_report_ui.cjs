@@ -58,6 +58,46 @@ const data = {
   assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
   await page.locator('#person-detail [data-character]').first().click();
   assert.equal(await page.locator('#image-search').inputValue(),'Zero');
+  // Highest-ranked character supplies the hero, irrespective of input row order.
+  await mount({...data,candidates:[...data.candidates].reverse()});
+  assert.equal(await page.locator('.report-intro-cover img').getAttribute('alt'),'Picture 0');
+  assert.equal(await page.locator('.chart-high').count(),3); // 8, 9, 10 on a 0–10 scale
+  await page.locator('[data-page="images"]').click();
+  await page.locator('[data-view="list"]').click();
+  assert.equal(await page.locator('.gallery-list tbody tr').count(),3);
+  await page.locator('#gallery-filter').selectOption('high');
+  assert.equal(await page.locator('.gallery-list tbody tr').count(),1);
+  await page.locator('.gallery-list [data-detail]').first().click();
+  assert.equal(await page.locator('dialog .detail-gallery [data-image]').count(),5);
+  await page.locator('dialog .detail-gallery [data-image]').first().click();
+  assert.equal(await page.locator('dialog h2').innerText(),'Picture 0');
+  assert.equal(await page.getByRole('button',{name:'上一张',exact:true}).isDisabled(),true);
+  await page.getByRole('button',{name:'下一张',exact:true}).click();
+  assert.equal(await page.locator('dialog h2').innerText(),'Picture 1');
+  await page.locator('dialog [data-detail]').click();
+  await page.locator('dialog [data-person]').first().click();
+  assert.equal(await page.locator('dialog').evaluate(el=>el.open),false);
+  assert.equal(await page.locator('#person-detail').count(),1);
+  await page.locator('[data-page="images"]').click();
+  assert.equal(await page.locator('[data-view="list"]').getAttribute('aria-pressed'),'true');
+  await page.locator('#gallery-filter').selectOption('all');
+  await page.locator('#gallery-sort').selectOption('score');
+  assert.match(await page.locator('.gallery-list tbody tr').first().innerText(),/Alice/);
+  // Average scores use a continuous threshold, even on a 1–4 integer vote scale.
+  const fractional=JSON.parse(JSON.stringify(data));
+  fractional.session.score_min=1; fractional.session.score_max=4;
+  fractional.characters[0].average_score=3.5;
+  await mount(fractional);
+  assert.equal(await page.locator('#full-ranking .score-high').first().innerText(),'3.50');
+  assert.match(await page.locator('.score-legend').first().innerText(),/3.4–4/);
+  // Structured summary escapes HTML; old text remains accessible under disclosure.
+  await mount({...data,ai_summary:'stored JSON',ai_analysis:{headline:'<headline>',insights:[{title:'Small sample',text:'<script>bad()</script>'}],closing:'Done'}});
+  assert.equal(await page.locator('.ai-headline').innerText(),'<headline>');
+  await page.locator('.ai-expanded summary').click();
+  assert.equal(await page.locator('.ai-expanded article p').innerText(),'<script>bad()</script>');
+  await mount({...data,ai_summary:'Legacy analysis'});
+  await page.locator('.ai-expanded summary').click();
+  assert.equal(await page.locator('.ai-copy').innerText(),'Legacy analysis');
   // Multiple participants: comparisons use exactly the selected person's votes.
   await mount({...data,statistics:{unique_voters:2,total_valid_votes:2}});
   await page.locator('[data-page="people"]').click();

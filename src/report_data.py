@@ -2,7 +2,7 @@
 from collections import defaultdict
 from typing import Iterable, Optional
 
-from .ai_summary_service import score_std_dev
+from .ai_summary_service import score_std_dev, parse_summary
 from .models import Vote
 
 
@@ -32,6 +32,7 @@ def enrich_report(payload: dict, votes: Optional[Iterable[Vote]] = None,
             character['vote_count'] / people_count
             if people_count and character['character'] in sent_characters else None
         )
+    payload['ai_analysis'] = parse_summary(payload.get('ai_summary'))
     payload['schema_version'] = 3
     payload['report_mode'] = 'directory'
     payload['privacy'] = 'participants' if include_participants else 'aggregate'

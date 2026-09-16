@@ -110,3 +110,20 @@ class ReportDataTest(unittest.TestCase):
             self.assertFalse((report / 'images').exists())
         with tempfile.TemporaryDirectory() as d:
             asyncio.run(run(Path(d)))
+
+
+class StructuredSummaryProjectionTest(unittest.TestCase):
+    def test_summary_projection_and_no_script_fallback(self):
+        from src.report_data import enrich_report
+        summary = {'headline':'<样本高分>', 'insights':[{'title':'观察', 'text':'仅有一位参与者。'}]}
+        payload = {'session': {'id':'s','short_id':'S','project_name':'P','score_min':0,'score_max':10,
+                              'status':'COMPLETED'},
+                   'statistics': {'unique_voters':0,'total_candidates':0,'total_valid_votes':0,'overall_average_score':None},
+                   'characters':[], 'candidates':[], 'ai_summary':json.dumps(summary,ensure_ascii=False)}
+        enrich_report(payload, include_participants=False)
+        self.assertEqual(payload['ai_analysis']['headline'], '<样本高分>')
+        html = DirectoryReportGenerator._render_html(payload)
+        fallback = html.split('<script id="report-data"')[0]
+        self.assertIn('&lt;样本高分&gt;', fallback)
+        self.assertIn('观察：仅有一位参与者。', fallback)
+        self.assertNotIn('"headline"', fallback)

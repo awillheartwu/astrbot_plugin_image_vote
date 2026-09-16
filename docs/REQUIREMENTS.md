@@ -1,5 +1,8 @@
 # AstrBot QQ 群图片轮播投票插件——开发要求
 
+> 历史需求／设计记录，不作为当前能力或操作授权依据。现行用法见 USER_GUIDE.md，资源管理见 DATA_MAINTENANCE.md，验收边界见 IMPLEMENTATION_STATUS.md。
+
+
 > 建议插件名：`astrbot_plugin_image_vote`
 >
 > 文档目标：作为 AI / Agent 前期开发输入，优先完成一个可稳定运行的 MVP，再逐步增加 WebUI、复杂统计与多平台兼容。

@@ -1,171 +1,76 @@
-# astrbot_plugin_image_vote
+<div align="center">
 
-在 QQ 群里按人物批次发送项目图片并收集人物评分（默认 1-4，可配成 1-5、1-10 或包含 0 的范围），结束后自动生成按人物归类的 HTML 报告。AstrBot 插件，面向 aiocqhttp / OneBot v11 / NapCat。
+<img src="logo.png" width="88" alt="LIRATING">
 
-## 功能
+# LIRATING · 人物图片投票
 
-- `/vote <项目名>` 先按人物稳定分组：人物按扫描时首次出现的顺序，人物内部保持原图顺序。
-- 同一人物的图片连续发送，中间不等待；第一张成功发出后立即开始接收该人物评分，最后一张发送完成后才开始完整人物间隔。
-- 群成员直接回复数字给当前人物评分，也可以引用本场任意已发图片，给该图片所属人物补投或改分。评分范围可配置为 0-100 内的连续区间，两位数和全角数字均可识别。
-- 同一用户对同一人物只保留一票；重复投票的取值策略可配：`last_wins`（默认）、`first_wins`、`max_score`、`min_score`。
-- 人物名默认取图片标题第一个短横线之前的部分，可用项目目录的 `project.json.characters` 明确覆盖。
-- 结束后生成目录式报告：`index.html` + `data.json` + 压缩后的 WebP 主图与缩略图，原图不复制、不修改。
-- 可选调用当前会话的 AI 模型生成统计总结，只发送结构化统计；调用失败不影响报告生成。
-- 每群同时只允许一个投票；暂停、恢复、提前结束、取消、重新导出、清理都有对应指令。
-- AstrBot 重启后未完成的投票停在 `PAUSED`，由管理员执行 `/vote resume` 从断点继续，不会自动刷图。
+**在 QQ 群里一起看图、给人物打分，把每一次选择留成一份报告。**
 
-## 环境
+[AstrBot 插件](https://github.com/AstrBotDevs/AstrBot) · OneBot v11 / NapCat · [MIT](LICENSE)
 
-- AstrBot **4.27.x**（在 4.27.5 上完成真机验收；更低版本未验证）
-- aiocqhttp / OneBot v11 / NapCat
-- 报告图片处理依赖 Pillow，AstrBot 环境已自带
+</div>
 
-## 安装
+## 从一组图片，到一场共同完成的评选
 
-面板安装：AstrBot WebUI → 插件管理 → 安装插件，填入本仓库地址。
+把作品图片按项目整理好，Lirating 会按人物依次展示。同一个人物可以有多张图片，每位参与者对这个人物只保留一张最终票。
 
-手动安装：把本仓库放到 `<AstrBot data>/plugins/astrbot_plugin_image_vote`，再在插件管理里重载。
+- **群里直接评分**：回复数字给当前人物打分；引用本场图片可以给对应人物补投或改分。
+- **按自己的节奏进行**：逐张或合并发送，支持暂停、继续、提前结束；重启后暂停等待管理员恢复。
+- **在网页中管理**：选择项目、预检、控制投票、下载历史报告和调整设置。
+- **把结果留下来**：人物排名、评分分布、图片图册与参与者明细，支持明暗主题；可选 AI 数据解读。
+- **离线也能看**：下载单文件 HTML 或目录 ZIP，保留、分享，不依赖外部 CDN。
 
-## 配置
+## 开始使用
 
-配置项由 `_conf_schema.json` 定义，在 WebUI 的插件配置页按分组展示。最常用的四个：
+需要 **AstrBot 4.27+** 与 **aiocqhttp / OneBot v11 / NapCat**。历史真机验证使用过 AstrBot 4.27.5、4.28.0；其他平台未验证。
 
-| 配置项 | 说明 |
+1. 在 AstrBot「插件管理 → 安装插件」填写仓库地址：
+   ```text
+   https://github.com/awillheartwu/astrbot_plugin_image_vote
+   ```
+2. 在插件设置中填写**图片项目根目录**；每个子文件夹对应一个项目。Docker 用户需先把图库挂载进容器。
+3. 打开插件的 **image-vote 网页**，在「项目」中点击“预检与开始”，选择目标群。也可以在群里发送 `/vote 项目名`。
+4. 群成员回复评分，等待本轮结束，在「历史与报告」下载结果。
+
+默认评分 **1–4 分**，可在设置中调整。人物的第一张图成功发出即开始收票，全部图片发完后再等待完整人物间隔。
+
+更深层或分散的图库目录，可在网页中登记为项目，不需要移动原图。预检先显示数量与规则，缩略图随后逐张加载，无需等图片全部加载才开始。
+
+## 群里常用的几条指令
+
+| 指令 | 用途 |
 | --- | --- |
-| `input_root` | 图片项目根目录，每个子文件夹是一个项目，项目名就是文件夹名 |
-| `output_root` | 报告输出根目录，建议放在 AstrBot data 目录下 |
-| `default_interval_seconds` | 人物投票间隔；同一人物图片之间不等待，首次试跑建议设成 5 |
-| `merge_character_images` | 同一个人物的多张图合并成一条消息发送；默认关闭（逐张发送） |
-| `merge_character_images_max` | 合并发送时一条消息最多几张图，默认 3；超出会拆成多条 |
-| `send_timeout_seconds` | 单条消息发送超时秒数，默认 90；超时按发送失败处理 |
-| `score_min` / `score_max` | 评分范围，默认 1-4，可设成 1-5、1-10 等；改动后群消息提示与报告标签自动跟随 |
+| `/vote 项目名` | 开始投票 |
+| `/vote list` / `/vote check 项目名` | 查看项目 / 预检 |
+| `/vote status` | 查看进度和当前人物 |
+| `/vote pause` / `/vote resume` | 暂停 / 继续 |
+| `/vote finish` / `/vote stop` | 提前结算 / 取消本轮 |
+| `/vote export` | 重新生成最近一场报告 |
 
-其余包括最后一个人物的等待、权限控制（仅管理员可开始、群白名单）、重复投票策略、报告压缩参数、AI 开关与 Top/Bottom 数量、发送重试次数、连续发送失败自动暂停阈值、结束时是否在群里提醒、是否自动生成报告、单文件报告是否发到群里等。WebUI 保存后配置会在下一条指令时自动生效，想立刻确认就打 `/vote reloadconfig` 看实际生效值。
+开始和控制投票默认需要管理员权限；更完整的命令与路径配置见 [使用手册](https://github.com/awillheartwu/astrbot_plugin_image_vote/blob/dev/docs/USER_GUIDE.md)。
 
-关于发送间隔：一个人物的图片会一张接一张连续发出。该人物最后一张发送完成后，才等待完整的 `default_interval_seconds`；最后一个人物使用 `final_grace_seconds`，且实际值不会短于人物间隔。
+## 报告怎么保存和分享
 
-`merge_character_images` 打开后，一个人物只发一条消息、内含该人物的全部图片；总耗时接近这些图片上传时间的总和（上传字节数不变，省掉的是逐条消息与逐张之间的开销），人物之间的等待间隔与逐张模式一致。一个人物的图片超过每条上限时会拆成多条消息，拆分只影响消息条数，人物投票窗口不变。
+- **轻量分享**：选择单文件 HTML。默认每个人物保留一张高清封面，其余图片使用缩略图；可切换为全部高清。
+- **完整保存**：目录报告下载为 ZIP，解压后保留整个文件夹，打开 `index.html`。
+- **保护参与者信息**：公开分享前关闭“报告包含参与者明细”，生成不含昵称、逐人评分和群号的汇总版。
+- **AI 解读**：只发送汇总统计，不上传整批图片。普通重导出复用已有解读，需要重新分析时使用 `/vote export --ai`。
 
-群里每条投票消息都带进度，而且首行只放名字：第一行「项目 · 人物」，第二行「第几位人物 / 该人物第几张」，第三行打分方法，最后一行才是引用改分用的定位标记「[投票 012/045 · 短ID]」。人物还没发完时第二行会写「之后还有 N 张」，最后一条写「本人物已发完」，因此无论逐张还是合并发送，中间那些中继消息都能一眼认出。标记放末行不影响引用投票：AstrBot 收到引用时会用 get_msg 取回被引用消息的完整原文。
+原图不会被修改。已有报告不会随插件升级自动更新，需要重新导出。
 
-项目与目录的对应关系由登记表解决：`input_root` 只覆盖「根目录下一层子目录」这种布局，层级更深或分散在别处的目录，用管理员的 `/vote register <项目名> <容器内绝对路径>` 登记，或直接编辑插件数据目录下的 `projects.json`。登记项可带 `interval_seconds`、`recursive`、`description`，解析优先级高于别名与 `input_root`。
+## 数据放在哪里？
 
-## 指令
+新配置中报告输出目录留空时，报告、数据库、头像和缩略图缓存、下载临时文件集中在插件数据目录。已设置的自定义报告目录会保留，不自动搬迁。
 
-| 指令 | 权限 | 说明 |
-| --- | --- | --- |
-| `/vote <项目名>` | 管理员 | 开始轮播 |
-| `/vote list` | 所有人 | 列出可用项目 |
-| `/vote check <项目名>` | 所有人 | 只做预检：图片数量、总大小、命名统计、排序方式、首末各 5 张、非法文件、预计耗时 |
-| `/vote status` | 所有人 | 中文状态、图片进度（第几位人物、第几张）、当前人物与已收票数、总票数、下一步与倒计时 |
-| `/vote pause` / `/vote resume` | 管理员 | 暂停 / 继续，暂停期间仍可引用已发图片投票 |
-| `/vote finish` | 管理员 | 立即停止后续发送并出结果 |
-| `/vote stop` | 管理员 | 取消本次投票，保留已收到的投票 |
-| `/vote export` | 管理员 | 用最近一次完成或取消的会话重新生成报告 |
-| `/vote cleanup <短ID 或 项目名 或 all confirm>` | 管理员 | 只删除本插件生成的报告目录 |
-| `/vote purge <短ID 或 session_id> confirm` | 管理员 | 彻底删除一场投票：报告目录 + 投票记录（票与候选），不可恢复；原图不受影响，页面历史里也有「彻底删除」按钮 |
-| `/vote register <项目名> <容器内绝对路径>` | 管理员 | 把任意目录登记成一个项目 |
-| `/vote unregister <项目名>` | 管理员 | 取消登记 |
-| `/vote projects` | 管理员 | 列出登记项与它们的容器内路径 |
-| `/vote reloadconfig` | 管理员 | 重新读取配置并打印当前实际生效的值 |
+缩略图缓存默认上限 64 MB、保留 7 天；头像和残留临时目录定期维护。**历史报告自动删除默认关闭，投票记录不会自动删除**。可在设置中开启报告保留策略，或从历史页清理报告／彻底删除场次。
 
-四条控制指令（`pause` / `resume` / `finish` / `stop`）执行后都会在群里回复确认消息：触发的是哪条指令、项目名、当前进度、会话状态，以及下一步该做什么。
+缓存上限不等于整个插件磁盘上限。原图、保留的报告和投票历史仍会随使用增长。详细边界见 [数据与维护](https://github.com/awillheartwu/astrbot_plugin_image_vote/blob/dev/docs/DATA_MAINTENANCE.md)。
 
-## Docker 路径映射
+## 文档与反馈
 
-插件只能访问容器内路径，宿主机目录需要先映射进容器：
+- [使用手册](https://github.com/awillheartwu/astrbot_plugin_image_vote/blob/dev/docs/USER_GUIDE.md)：路径映射、全部命令、图片策略与 AI 配置。
+- [实现与验收状态](https://github.com/awillheartwu/astrbot_plugin_image_vote/blob/dev/docs/IMPLEMENTATION_STATUS.md)：已验证的范围与限制。
+- [更新记录](CHANGELOG.md) · [问题反馈](https://github.com/awillheartwu/astrbot_plugin_image_vote/issues)
+- 开发者：[架构](https://github.com/awillheartwu/astrbot_plugin_image_vote/blob/dev/docs/ARCHITECTURE.md) · [贡献约定](CONTRIBUTING.md) · [发布流程](https://github.com/awillheartwu/astrbot_plugin_image_vote/blob/dev/docs/RELEASE.md)
 
-```yaml
-volumes:
-  - /volume1/vote-projects:/vote/projects:ro
-  - /volume1/vote-reports:/vote/reports
-```
-
-对应配置 `input_root = /vote/projects`、`output_root = /vote/reports`。
-
-## 报告
-
-默认目录模式，一个会话一个文件夹，可以整体打包、静态托管或直接删除：
-
-```text
-<output_root>/<项目名>/<短ID>-<会话ID前8位>/
-├── index.html
-├── data.json
-├── report.css
-├── report.js
-└── images/0001.webp, 0001_thumb.webp, ...
-```
-
-页面无外部 CDN 依赖，可以 `file://` 直接打开。概览按人物排名，「全部图片」把同一人物的所有图片放在同一分组，「按参与者查看」展示每位参与者对各人物保留的最终一票。图片仅作为人物来源与浏览素材，不再单独排名。清理只删除带本插件 marker 的目录，不会触碰 `input_root`。
-
-## 磁盘占用与清理
-
-插件只往两处写东西，方便整体备份或清理：
-
-| 位置 | 内容 | 清理方式 |
-| --- | --- | --- |
-| `data/plugin_data/astrbot_plugin_image_vote/` | `vote.db`（会话、图片、票）、`projects.json`（项目登记表）、`avatar_cache/`（报告头像缓存，128px WebP）、`temp/`（下载临时包） | 数据库保留历史记录，需要删除场次时使用显式确认的 purge；头像缓存按 `avatar_cache_retention_days`（默认 30 天）在启动及每小时自动清理 |
-| `output_root`（默认 `./data/reports`） | 各场次的报告目录，以及生成期间临时出现的 `.image-vote-*` staging 目录 | 启用自动清理后，报告按 `report_retention_days`（默认 30 天）清理，可用 `/vote cleanup` 手动清理；staging 目录在启动及每小时清理超过一天、带归属标记且所属进程已结束的残留 |
-
-目录报告下载 ZIP 的临时包位于插件数据目录 `temp/image-vote-download-*`，与其他插件缓存分开。只清理带归属标记且所属进程已结束的过期目录；无标记的旧临时目录不自动删除。
-
-实测规模参考：45 张 224 MB 的项目，目录版报告约 4 MB、单文件版约 16 MB；插件数据目录本身不到 1 MB（含头像缓存）。默认关闭自动删除报告；启用后按 30 天保留期删除，投票记录保留，需要时可用 `/vote export` 重新生成报告。
-## 开发
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v
-
-# 报告页 / 面板页的浏览器检查（需要 Playwright 与 Chrome，二选一安装 playwright-core 即可）
-npm install --prefix /tmp/pwcheck playwright-core
-NODE_PATH=/tmp/pwcheck/node_modules node tools/check_report_ui.cjs
-NODE_PATH=/tmp/pwcheck/node_modules node tools/check_panel_ui.cjs --shots /tmp/panel-shots
-```
-
-核心逻辑不依赖 AstrBot，本地没有 AstrBot 和 Pillow 也能跑测试。
-
-- `docs/ARCHITECTURE.md` 分层说明，以及 AstrBot 4.27.5 / 4.28.0 实测的 API 事实
-- `docs/ROADMAP.md` 尚未完成的条目与后续需求
-- `docs/REQUIREMENTS.md` 需求原文
-- `tools/astrbot_api_probe.py`、`tools/probe_plugin/` 现场兼容性探针
-
-## 已知限制
-
-- 只在 AstrBot 4.27.5 加 NapCat 的组合上做过真机验收，其他版本与平台未验证。
-- 跨目录项目要先用 volume 把图库根目录映射进容器，再用 `/vote register` 或 `projects.json` 登记；容器看不到的路径无法使用。
-- 报告可包含昵称、缓存头像和最终逐人评分；`report_include_participants=false` 生成不含这些明细与群号的汇总分享版。
-- `single_html` 模式可选，超过 `single_html_max_mb` 会自动回退目录模式。
-
-## 插件网页与人物报告（0.13.0）
-
-在 AstrBot 的本插件 Pages 中打开「image-vote」页面，使用当前 Dashboard 管理员账户操作。网页提供：
-
-- **运行**：从已连接的 OneBot 群选择目标，预检后启动；暂停、继续、提前结束或取消。
-- **项目**：登记容器内目录、编辑项目覆盖参数、预览图片；目录浏览限于输入根、登记目录及 `web_browse_roots`。取消登记不会删除原图。
-- **历史与报告**：查看场次与报告状态，下载、重新生成和清理。目录报告下载完整 ZIP，单文件报告下载 HTML。
-- **设置**：分组与搜索，修改后明确保存；配置仍写入同一份 AstrBotConfig。发现其他页面修改会拒绝覆盖，保留当前草稿。
-
-新版报告有「概览 / 全部图片 / 按参与者查看」：概览和分值分布以人物为单位，全部图片按人物成组，参与者页只列每个人物的一张最终票。报告不需要后台或 CDN；目录版请保留整个目录，单文件版可以独立打开。
-
-`ai_prompt_template` 默认填入完整提示词，可直接编辑或恢复默认，支持 `{project_name}`、`{statistics}`、`{top_n}`、`{bottom_n}`、`{score_min}`、`{score_max}`。普通导出复用已有 AI 摘要，只有 `/vote export --ai` 或网页勾选重新生成时才再次调用模型。AI 只接收统计，不接收整批图片。
-
-本轮网页按 AstrBot v4.27.5 官方接口实现，并已在 **AstrBot 4.28.0 + NapCat** 的真实实例上跑通完整场次（发送、计票、报告生成与下载）。复现命令、完整验证范围和限制见 [实现与验收记录](docs/IMPLEMENTATION_STATUS.md)。
-
-### 报告浏览与 AI 数据观察
-
-报告头图优先选取排名最高人物的图片。全部图片可在图册与人物列表间切换，支持人物 / 图片搜索、高分 / 暂无评分筛选和排序；点击人物查看详情，图片详情可前后切换。金色表示评分区间上 20% 的高分（例如 0–10 分制从 8 分起），具体阈值在页面标明，图片本身仍不独立计分。
-
-默认 AI 解读从全人物统计寻找值得注意的数据关系，输出一句话与简短观察；小样本、单人投票和未评分均有解释约束。报告支持折叠阅读，新结构化结果与旧纯文本均兼容。已有自定义 `ai_prompt_template` 不会被覆盖；空白配置会填入默认提示词，设置页可直接编辑或恢复默认。普通导出沿用已保存的摘要，需 `/vote export --ai` 或网页勾选重新生成 AI 才重新分析。
-
-### 报告图片体积
-
-默认 `report_image_policy=character_cover`：每个人物首张成功展示图片保留高清派生图（无成功图片时取首张），其余图片仅保留缩略图；设置为 `all` 可恢复每张高清。原图始终不修改。高清默认 WebP、1920×1920 内、质量 82；缩略图宽 480、质量 72。质量参数不是固定文件压缩比例。
-
-单文件报告与管理页下载共用同一份资源池，相同图片内容只内嵌一次，页面多处复用；Base64 本身约增加三分之一体积。单文件报告禁用 JavaScript 时保留统计文本，浏览内嵌图片需启用 JavaScript。目录报告继续用文件路径复用图片。
-
-三张本地示例插画的实测主图约 190–211 KB、缩略图约 25–30 KB；两个人物三张图的单文件示例由 1.88 MB 降至 0.73 MB。按这些样本估算，100 张不同图片、20 个人物，精简单文件的图片载荷约 8.9 MB，另加页面、统计与头像；实际照片 / 截图复杂度不同，需用真实项目重导出确认。
-
-## 开发与发布
-
-代码按 MIT 许可证发布。日常开发使用 `dev`，正式发布使用 `main` 与版本标签；两个仓库分别推送并核对提交。开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，发布与回退见 [docs/RELEASE.md](docs/RELEASE.md)（开发文档保留在源码仓库，发布归档不包含）。
-
-市场仓库地址：`https://github.com/awillheartwu/astrbot_plugin_image_vote`。首次配置请设置容器可访问的图片输入目录与可写的报告输出目录；管理页须从已登录的 AstrBot Plugin Pages 打开。
+反馈问题时请附插件版本、AstrBot 版本、报错日志和复现步骤，记得遮蔽群号、昵称及其他私人信息。

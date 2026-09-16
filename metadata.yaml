@@ -2,7 +2,7 @@ name: astrbot_plugin_image_vote
 display_name: AstrBot 人物图片投票
 short_desc: 按人物连续发送项目图片并收集人物评分，自动生成按人物归类的 HTML 报告。
 desc: 在 QQ 群中按人物批次发送本地项目图片；同一人物多图共用一票与一个投票窗口，结束后生成按人物归类的 HTML 报告。
-version: 0.13.12
+version: 0.13.13
 author: AstrBot Image Vote
 astrbot_version: ">=4.27.0"
 support_platforms:

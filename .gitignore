@@ -14,6 +14,7 @@ venv/
 /probe-output/
 /probe-report*.txt
 /dist/
+/.pytest_cache/
 
 # 编辑器与系统
 .DS_Store
@@ -21,4 +22,6 @@ venv/
 .vscode/
 /qa/
 
-.pytest_cache/
+# 工具生成的示例报告与打包产物
+/prototypes/image-vote/generated/
+/*.zip

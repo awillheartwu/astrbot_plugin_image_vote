@@ -40,8 +40,9 @@ DEFAULT_CONFIG = {
     "ai_top_n": 5,
     "ai_bottom_n": 3,
     "auto_resume_after_restart": False,
-    "auto_cleanup_reports": False,
+    "auto_cleanup_reports": True,
     "report_retention_days": 30,
+    "avatar_cache_retention_days": 30,
     "max_send_retries": 3,
     "send_retry_base_seconds": 2,
     "send_failure_pause_threshold": 3,
@@ -98,8 +99,9 @@ class VoteConfig:
     ai_top_n: int = 5
     ai_bottom_n: int = 3
     auto_resume_after_restart: bool = False
-    auto_cleanup_reports: bool = False
+    auto_cleanup_reports: bool = True
     report_retention_days: int = 30
+    avatar_cache_retention_days: int = 30
     max_send_retries: int = 3
     send_retry_base_seconds: int = 2
     send_failure_pause_threshold: int = 3
@@ -152,6 +154,8 @@ class VoteConfig:
             raise ValueError("ai_top_n/ai_bottom_n cannot be negative")
         if self.send_failure_pause_threshold < 0:
             raise ValueError("send_failure_pause_threshold cannot be negative")
+        if self.avatar_cache_retention_days < 0:
+            raise ValueError("avatar_cache_retention_days cannot be negative")
 
     @property
     def effective_final_grace_seconds(self) -> int:

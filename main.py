@@ -33,6 +33,7 @@ _activity_module = _internal("src.report_activity")
 _workspace_module = _internal("src.workspace_api")
 _models_module = _internal("src.models")
 _character_service_module = _internal("src.character_service")
+_maintenance_module = _internal("src.maintenance")
 
 register = _compat.register
 filter = _compat.filter
@@ -313,10 +314,26 @@ class ImageVotePlugin(Star):
     async def initialize(self):
         await self.store.initialize()
         await self.application.recover_incomplete_sessions()
-        self.application.cleanup_expired_reports()
+        self.run_self_maintenance()
         self.workspace_api = _workspace_module.WorkspaceAPI(self)
         if self.workspace_api.register():
             self.workspace_api.ready = True
+
+    def run_self_maintenance(self) -> None:
+        """启动/重载时清理插件自有产物：过期报告、过期头像缓存、残留 staging 目录。"""
+        reports = self.application.cleanup_expired_reports()
+        data_dir = get_plugin_data_dir(self.context, Path(self.settings.output_root).expanduser())
+        avatars = _maintenance_module.prune_avatar_cache(
+            data_dir / 'avatar_cache', self.settings.avatar_cache_retention_days
+        )
+        temps = _maintenance_module.prune_stale_temp_dirs(
+            _maintenance_module.temp_scan_bases(Path(self.settings.output_root).expanduser())
+        )
+        if reports.removed or avatars or temps:
+            logger.info(
+                "维护清理：过期报告 %d 个（跳过 %d 个使用中），头像缓存 %d 个，残留临时目录 %d 个",
+                reports.removed, reports.skipped, avatars, temps,
+            )
 
     @filter.command("vote")
     async def vote_command(self, event: Any):

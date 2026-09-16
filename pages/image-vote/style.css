@@ -782,7 +782,13 @@ button:disabled {
   --button-ink: #211735; --accent-end: #9677e7;
   --shadow-card: 0 8px 28px #06081025;
 }
-body { background: radial-gradient(ellipse at 100% 0,var(--soft),transparent 52%),var(--bg); }
+/* 背景光晕按视口固定，避免随内容高度或滚动出现可见的分层边界。 */
+body {
+  background-color: var(--bg);
+  background-image: radial-gradient(ellipse 90% 70% at 100% 0, var(--soft), transparent 72%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
 .site-header, #app { max-width: 1400px; }
 .site-header { padding-top: 22px; padding-bottom: 22px; }
 .brand { font-size: 25px; }

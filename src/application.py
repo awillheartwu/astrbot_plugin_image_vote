@@ -634,6 +634,9 @@ class VoteApplication:
         """运行中改了评分范围时提醒一次：计票以会话快照为准，新范围下个会话生效。"""
         if session.id in self._range_warned:
             return
+        if len(self._range_warned) > 200:
+            # 长期运行的实例只保留最近的告警记录，避免这个集合无限增长。
+            self._range_warned.clear()
         self._range_warned.add(session.id)
         logger.warning(
             "session %s 的评分范围是 %d-%d，当前配置是 %d-%d；本次投票按会话范围计票，新范围从下一个会话开始生效",

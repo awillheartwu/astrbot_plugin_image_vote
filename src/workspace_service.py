@@ -23,6 +23,12 @@ from .statistics_service import calculate_statistics
 
 logger = get_logger()
 
+# 项目快照与缩略图的短缓存：面板一次预检只扫一次目录，重复打开不再解码原图。
+SNAPSHOT_TTL_SECONDS = 20
+THUMBNAIL_CACHE_SIZE = 64
+THUMBNAIL_PREVIEW_SIZE = 240
+
+
 class ConfigConflict(ValueError):
     pass
 
@@ -33,7 +39,41 @@ class WorkspaceService:
         self.lock = asyncio.Lock()
         self.group_cache = []
         self._groups_at = 0
+        self._snapshots = {}
+        self._thumbnails = {}
         self.schema = json.loads((Path(__file__).resolve().parents[1] / '_conf_schema.json').read_text())
+
+    async def _inspect(self, name: str, recursive: bool):
+        """带 20 秒 TTL 的项目快照：预检与 6 张缩略图共用一次扫描结果。"""
+        key = (name, bool(recursive))
+        now = asyncio.get_running_loop().time()
+        cached = self._snapshots.get(key)
+        if cached is not None and now - cached[0] < SNAPSHOT_TTL_SECONDS:
+            return cached[1]
+        snapshot = await asyncio.to_thread(self.plugin.project_service.inspect, name, recursive)
+        self._snapshots = {k: v for k, v in self._snapshots.items() if now - v[0] < SNAPSHOT_TTL_SECONDS}
+        self._snapshots[key] = (now, snapshot)
+        return snapshot
+
+    def thumbnail_data_uri(self, source: Path, box: int = 480) -> str:
+        """把原图压成小尺寸 WEBP 的 data URI；按「路径 + 修改时间 + 尺寸」缓存。"""
+        import io
+        from PIL import Image, ImageOps
+        stat = source.stat()
+        key = (str(source), stat.st_mtime_ns, stat.st_size, box)
+        cached = self._thumbnails.get(key)
+        if cached is not None:
+            return cached
+        with Image.open(source) as raw:
+            image = ImageOps.exif_transpose(raw)
+            image.thumbnail((box, box))
+            buffer = io.BytesIO()
+            image.convert('RGB').save(buffer, 'WEBP', quality=72)
+        value = 'data:image/webp;base64,' + base64.b64encode(buffer.getvalue()).decode()
+        if len(self._thumbnails) >= THUMBNAIL_CACHE_SIZE:
+            self._thumbnails.clear()
+        self._thumbnails[key] = value
+        return value
 
     def reading(self, session_id):
         """报告读取期间的互斥由应用层守卫持有：网页与群命令共用同一份状态。"""
@@ -147,17 +187,30 @@ class WorkspaceService:
 
     async def preview(self, name):
         settings = self.plugin.project_service.resolve_options(name)
-        snapshot = await asyncio.to_thread(self.plugin.project_service.inspect, name, settings.get('recursive', self.plugin.settings.recursive_scan))
+        snapshot = await self._inspect(name, settings.get('recursive', self.plugin.settings.recursive_scan))
         interval = settings.get('interval_seconds', self.plugin.settings.default_interval_seconds)
         character_count = len({character_of(candidate) for candidate in snapshot.candidates})
         root = Path(self.plugin.settings.output_root).expanduser()
         parent = root
         while not parent.exists() and parent != parent.parent:
             parent = parent.parent
+        # 预检弹窗直接吃内联缩略图：不再由前端为每张图各发一次请求（那会各自再扫一次目录并解码原图）。
+        first = snapshot.candidates[:6]
+        preview_root = Path(snapshot.project_path)
+        thumbs = await asyncio.gather(*(
+            asyncio.to_thread(self.thumbnail_data_uri, preview_root / candidate.source_relative_path, THUMBNAIL_PREVIEW_SIZE)
+            for candidate in first
+        ), return_exceptions=True)
+        first_rows = []
+        for candidate, thumb in zip(first, thumbs):
+            row = asdict(candidate)
+            if isinstance(thumb, str):
+                row['thumb'] = thumb
+            first_rows.append(row)
         return {'name': snapshot.project_name, 'count': len(snapshot.candidates), 'character_count': character_count, 'total_size': snapshot.total_size,
                 'sort_mode': snapshot.sort_mode, 'warnings': list(snapshot.warnings),
                 'invalid_files': list(snapshot.invalid_files),
-                'first': [asdict(c) for c in snapshot.candidates[:6]],
+                'first': first_rows,
                 'last': [c.source_filename for c in snapshot.candidates[-5:]],
                 'interval_seconds': interval, 'interval_source': 'project' if 'interval_seconds' in settings else 'default',
                 'score_min': self.plugin.settings.score_min, 'score_max': self.plugin.settings.score_max,

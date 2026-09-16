@@ -1,3 +1,4 @@
+# 发布包（插件市场 zip）由 git archive 生成；export-ignore 只影响发布包，源码仓库保留全部文件。
 * text=auto eol=lf
 *.png binary
 *.webp binary
@@ -10,3 +11,7 @@
 /CONTRIBUTING.md export-ignore
 /.gitignore export-ignore
 /.gitattributes export-ignore
+/dist export-ignore
+/.github export-ignore
+/*.zip export-ignore
+/probe-report*.txt export-ignore

@@ -156,23 +156,14 @@ class WorkspaceAPI:
         else:
             name = query.get('project','')
             options = self.plugin.project_service.resolve_options(name)
-            snapshot = await asyncio.to_thread(self.plugin.project_service.inspect, name, options.get('recursive',self.plugin.settings.recursive_scan))
+            snapshot = await service._inspect(name, options.get('recursive', self.plugin.settings.recursive_scan))
             source_root = Path(snapshot.project_path)
             index = int(query.get('index',1))
             candidate = next((c for c in snapshot.candidates if c.display_index == index), None)
         if candidate is None:
             raise FileNotFoundError('图片不存在')
         source = PathGuard(source_root).ensure_within(source_root/candidate.source_relative_path, allow_root=False)
-        def read():
-            import io
-            from PIL import Image, ImageOps
-            with Image.open(source) as raw:
-                image = ImageOps.exif_transpose(raw).convert('RGB')
-                image.thumbnail((480,480))
-                buffer = io.BytesIO()
-                image.save(buffer,'WEBP',quality=72)
-                return 'data:image/webp;base64,'+base64.b64encode(buffer.getvalue()).decode()
-        return {'image': await asyncio.to_thread(read)}
+        return {'image': await asyncio.to_thread(service.thumbnail_data_uri, source)}
 
     async def download(self, path):
         payload = json.loads((path/'data.json').read_text())

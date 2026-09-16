@@ -283,12 +283,19 @@
       "auto_cleanup_reports": {
         "description": "自动清理过期报告",
         "type": "bool",
-        "default": false
+        "default": true,
+        "hint": "默认开启：插件启动与重载时删除超过保留天数、且带本插件 marker 的报告目录；投票记录不受影响，需要时可用 /vote export 重新生成。"
       },
       "report_retention_days": {
         "description": "报告保留天数",
         "type": "int",
         "default": 30
+      },
+      "avatar_cache_retention_days": {
+        "description": "头像缓存保留天数",
+        "type": "int",
+        "default": 30,
+        "hint": "报告里的参与者头像缓存在插件数据目录，超过这个天数会在启动时清理；0 表示不清理。"
       },
       "max_send_retries": {
         "description": "单条消息最大发送重试次数",

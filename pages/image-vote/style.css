@@ -924,3 +924,7 @@ dialog label { font-size: 12px; }
   .project-media img { object-position: center 35%; }
 }
 @media (prefers-reduced-motion: reduce) { *, *:before, *:after { transition: none !important; } }
+.preflight-thumb { margin: 0; width: 120px; min-height: 110px; }
+.preflight-thumb figcaption { font-size: 10px; color: var(--muted); overflow-wrap: anywhere; margin-top: 4px; }
+.preflight-thumb img:not([src]) { visibility: hidden; }
+.preflight-thumb:not(.cover-loaded) { background: var(--soft); border-radius: 6px; }

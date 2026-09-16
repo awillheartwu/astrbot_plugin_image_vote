@@ -4,6 +4,7 @@ import importlib
 import asyncio
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -134,9 +135,11 @@ class ImageVotePlugin(Star):
         self._raw_config = raw
         self._config_source = source or resolved_source
         self.settings = VoteConfig.from_mapping(raw)
-        data_dir = get_plugin_data_dir(self.context, Path(self.settings.output_root).expanduser())
+        data_dir = get_plugin_data_dir(self.context, Path(self.settings.output_root or "./data").expanduser())
         if self.store is None:
             self.store = SQLiteStore(data_dir / "vote.db")
+        if not self.settings.output_root.strip():
+            self.settings = replace(self.settings, output_root=str(Path(self.store.database_path).parent / "reports"))
         self.project_registry = ProjectRegistry(Path(self.store.database_path).parent / "projects.json")
         self.project_service = ProjectService(Path(self.settings.input_root), registry=self.project_registry)
         if self.session_manager is None:
@@ -325,17 +328,20 @@ class ImageVotePlugin(Star):
     async def run_self_maintenance(self) -> None:
         """启动/重载时清理插件自有产物：过期报告、过期头像缓存、残留 staging 目录。"""
         reports = self.application.cleanup_expired_reports()
-        data_dir = get_plugin_data_dir(self.context, Path(self.settings.output_root).expanduser())
+        data_dir = Path(self.store.database_path).parent
         avatars = await asyncio.to_thread(_maintenance_module.prune_avatar_cache,
             data_dir / 'avatar_cache', self.settings.avatar_cache_retention_days
         )
         temps = await asyncio.to_thread(_maintenance_module.prune_stale_temp_dirs,
             _maintenance_module.temp_scan_bases(Path(self.settings.output_root).expanduser(), data_dir)
         )
-        if reports.removed or avatars or temps:
+        thumbs = await asyncio.to_thread(_maintenance_module.prune_thumbnail_cache,
+            data_dir / 'cache' / 'thumbnails', self.settings.thumbnail_cache_retention_days,
+            self.settings.thumbnail_cache_max_mb)
+        if reports.removed or avatars or temps or thumbs:
             logger.info(
-                "维护清理：过期报告 %d 个（跳过 %d 个使用中），头像缓存 %d 个，残留临时目录 %d 个",
-                reports.removed, reports.skipped, avatars, temps,
+                "维护清理：过期报告 %d 个（跳过 %d 个使用中），头像缓存 %d 个，残留临时目录 %d 个，缩略图缓存 %d 个",
+                reports.removed, reports.skipped, avatars, temps, thumbs,
             )
 
     async def _maintenance_loop(self):

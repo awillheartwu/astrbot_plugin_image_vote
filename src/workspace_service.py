@@ -8,7 +8,9 @@ import json
 import os
 import tempfile
 import threading
+import time
 import zipfile
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 
@@ -16,6 +18,7 @@ from .ai_summary_service import build_statistics_prompt, build_summary_statistic
 from .character_service import character_of
 from .config import VoteConfig
 from .logging_utils import get_logger
+from .maintenance import prune_thumbnail_cache
 from .models import SessionStatus
 from .path_guard import PathGuard
 from .report_generator import REPORT_MARKER, PLUGIN_NAME
@@ -27,7 +30,6 @@ logger = get_logger()
 # 项目快照与缩略图的短缓存：面板一次预检只扫一次目录，重复打开不再解码原图。
 SNAPSHOT_TTL_SECONDS = 20
 THUMBNAIL_CACHE_SIZE = 64
-THUMBNAIL_PREVIEW_SIZE = 240
 
 
 class ConfigConflict(ValueError):
@@ -42,6 +44,8 @@ class WorkspaceService:
         self._groups_at = 0
         self._snapshot_lock = asyncio.Lock()
         self._thumbnail_lock = threading.Lock()
+        self._thumbnail_slots = asyncio.Semaphore(1)
+        self.thumbnail_cache_root = Path(plugin.store.database_path).parent / "cache" / "thumbnails"
         self._snapshots = {}
         self._thumbnails = {}
         self.schema = json.loads((Path(__file__).resolve().parents[1] / '_conf_schema.json').read_text())
@@ -61,6 +65,15 @@ class WorkspaceService:
             self._snapshots[key] = (now, snapshot)
             return snapshot
 
+    async def thumbnail_async(self, source: Path, box: int = 480):
+        async with self._thumbnail_slots:
+            worker = asyncio.create_task(asyncio.to_thread(self.thumbnail_data_uri, source, box))
+            try:
+                return await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                await worker
+                raise
+
     def thumbnail_data_uri(self, source: Path, box: int = 480) -> str:
         """把原图压成小尺寸 WEBP 的 data URI；按「路径 + 修改时间 + 尺寸」缓存。"""
         # Bound peak decoded-image memory and protect the cache across worker threads.
@@ -74,13 +87,41 @@ class WorkspaceService:
         key = (str(source), stat.st_mtime_ns, stat.st_size, box)
         cached = self._thumbnails.get(key)
         if cached is not None:
+            disk = self.thumbnail_cache_root / (hashlib.sha256(repr(key).encode()).hexdigest() + '.webp')
+            try:
+                if not disk.is_symlink() and disk.stat().st_mtime < time.time() - 3600:
+                    os.utime(disk, None)
+            except OSError:
+                pass
             return cached
-        with Image.open(source) as raw:
-            image = ImageOps.exif_transpose(raw)
-            image.thumbnail((box, box))
-            buffer = io.BytesIO()
-            image.convert('RGB').save(buffer, 'WEBP', quality=72)
-        value = 'data:image/webp;base64,' + base64.b64encode(buffer.getvalue()).decode()
+        cache_root = self.thumbnail_cache_root
+        cache_root.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(repr(key).encode()).hexdigest()
+        disk = cache_root / (digest + '.webp')
+        content = None
+        if disk.is_file() and not disk.is_symlink():
+            try:
+                content = disk.read_bytes()
+                os.utime(disk, None)
+            except OSError:
+                pass
+        if content is None:
+            with Image.open(source) as raw:
+                raw.draft('RGB', (box, box))
+                image = ImageOps.exif_transpose(raw)
+                image.thumbnail((box, box))
+                buffer = io.BytesIO()
+                image.convert('RGB').save(buffer, 'WEBP', quality=72)
+            content = buffer.getvalue()
+            temporary = cache_root / (digest + '.' + uuid.uuid4().hex + '.tmp')
+            try:
+                temporary.write_bytes(content)
+                os.replace(temporary, disk)
+            finally:
+                temporary.unlink(missing_ok=True)
+            prune_thumbnail_cache(cache_root, self.plugin.settings.thumbnail_cache_retention_days,
+                                  self.plugin.settings.thumbnail_cache_max_mb)
+        value = 'data:image/webp;base64,' + base64.b64encode(content).decode()
         if len(self._thumbnails) >= THUMBNAIL_CACHE_SIZE:
             self._thumbnails.clear()
         self._thumbnails[key] = value
@@ -205,22 +246,7 @@ class WorkspaceService:
         parent = root
         while not parent.exists() and parent != parent.parent:
             parent = parent.parent
-        # 预检弹窗直接吃内联缩略图：不再由前端为每张图各发一次请求（那会各自再扫一次目录并解码原图）。
-        first = snapshot.candidates[:6]
-        preview_root = Path(snapshot.project_path)
-        def preview_thumbnail(candidate):
-            safe = PathGuard(preview_root).ensure_within(preview_root / candidate.source_relative_path, allow_root=False)
-            return self.thumbnail_data_uri(safe, THUMBNAIL_PREVIEW_SIZE)
-        thumbs = await asyncio.gather(*(
-            asyncio.to_thread(preview_thumbnail, candidate)
-            for candidate in first
-        ), return_exceptions=True)
-        first_rows = []
-        for candidate, thumb in zip(first, thumbs):
-            row = asdict(candidate)
-            if isinstance(thumb, str):
-                row['thumb'] = thumb
-            first_rows.append(row)
+        first_rows = [asdict(candidate) for candidate in snapshot.candidates[:6]]
         return {'name': snapshot.project_name, 'count': len(snapshot.candidates), 'character_count': character_count, 'total_size': snapshot.total_size,
                 'sort_mode': snapshot.sort_mode, 'warnings': list(snapshot.warnings),
                 'invalid_files': list(snapshot.invalid_files),

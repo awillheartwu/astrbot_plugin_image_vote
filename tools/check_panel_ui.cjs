@@ -56,6 +56,7 @@ function bridgeScript() {
   return ({ payload }) => {
     const respond = (value) => Promise.resolve({ status: 'ok', data: value });
     window.__downloads = [];
+    window.__thumbWaiters=[]; window.__groupWaiters=[]; window.__previewWaiters=[];
     window.AstrBotPluginPage = {
       ready: () => Promise.resolve({ isDark: payload.theme === "dark" }),
       onContext: () => {},
@@ -66,8 +67,12 @@ function bridgeScript() {
         if (endpoint === 'sessions') return respond({ sessions: params.active === 'true' ? payload.active : payload.history, total: payload.total });
         if (endpoint === 'config') return respond({ values: payload.values, schema: payload.schema, revision: 3 });
         if (endpoint === 'providers') return respond(payload.providers);
-        if (endpoint === 'groups') return respond(payload.groups);
-        if (endpoint === 'thumbnail') return respond({ image: payload.svg });
+        if (endpoint === 'groups') return window.__holdGroups ? new Promise(resolve=>window.__groupWaiters.push(()=>resolve({status:'ok',data:payload.groups}))) : respond(payload.groups);
+        if (endpoint === 'projects/preview') {
+          const data={name:params.name,character_count:1,count:3,total_size:30000,estimated_seconds:20,score_min:1,score_max:4,interval_seconds:20,interval_source:'global',output_writable:true,first:[{display_index:1,display_title:'Preview',source_filename:'1.png'}],last:['3.png'],invalid_files:[],warnings:[]};
+          return window.__holdPreview ? new Promise(resolve=>window.__previewWaiters.push(()=>resolve({status:'ok',data}))) : respond(data);
+        }
+        if (endpoint === 'thumbnail') return window.__holdThumbs ? new Promise(resolve=>window.__thumbWaiters.push(()=>resolve({status:'ok',data:{image:payload.svg}}))) : respond({ image: payload.svg });
         return respond({});
       },
       apiPost: () => respond({}),
@@ -134,6 +139,26 @@ function bridgeScript() {
             await tab.locator('[data-action="unregister"]').click();
             assert.match(await tab.locator('#modal').innerText(),/不删除原始图片/);
             await tab.locator('#modal .modal-head [data-action="close"]').click();
+          }
+          if(name==='rich' && page==='projects' && width===1440) {
+            await tab.evaluate(()=>{window.__holdGroups=true;window.__holdThumbs=true;});
+            await tab.locator('[data-action="preflight"]').first().click();
+            await tab.locator('#modal .facts').waitFor();
+            assert.equal(await tab.locator('#modal [data-action="confirm-start"]').isDisabled(),true);
+            await tab.waitForFunction(()=>window.__thumbWaiters.length>0);
+            assert.equal(await tab.locator('#modal .preflight-thumb img').getAttribute('src'),null);
+            await tab.evaluate(()=>{window.__holdGroups=false;window.__groupWaiters.splice(0).forEach(fn=>fn());});
+            await tab.waitForFunction(()=>!document.querySelector('[data-action="confirm-start"]').disabled);
+            await tab.evaluate(()=>{window.__holdThumbs=false;window.__thumbWaiters.splice(0).forEach(fn=>fn());});
+            await tab.locator('.preflight-thumb.cover-loaded').waitFor();
+            await tab.locator('#modal .modal-head [data-action="close"]').click();
+            await tab.evaluate(()=>{window.__holdPreview=true;});
+            await tab.locator('[data-action="preflight"]').first().click();
+            await tab.waitForFunction(()=>window.__previewWaiters.length>0);
+            await tab.locator('#modal .modal-head [data-action="close"]').click();
+            await tab.evaluate(()=>{window.__holdPreview=false;window.__previewWaiters.splice(0).forEach(fn=>fn());});
+            await tab.waitForTimeout(50);
+            assert.equal(await tab.locator('#modal').evaluate(el=>el.open),false);
           }
           if(name==='rich' && page==='history') {
             await tab.locator('[data-action="download"] .control-icon').first().click();

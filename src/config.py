@@ -7,7 +7,7 @@ from .ai_summary_service import validate_prompt_template, DEFAULT_PROMPT_TEMPLAT
 
 DEFAULT_CONFIG = {
     "input_root": "./data/projects",
-    "output_root": "./data/reports",
+    "output_root": "",
     "recursive_scan": False,
     "web_browse_roots": [],
     "default_interval_seconds": 20,
@@ -43,6 +43,8 @@ DEFAULT_CONFIG = {
     "auto_cleanup_reports": False,
     "report_retention_days": 30,
     "avatar_cache_retention_days": 30,
+    "thumbnail_cache_retention_days": 7,
+    "thumbnail_cache_max_mb": 64,
     "max_send_retries": 3,
     "send_retry_base_seconds": 2,
     "send_failure_pause_threshold": 3,
@@ -102,6 +104,8 @@ class VoteConfig:
     auto_cleanup_reports: bool = False
     report_retention_days: int = 30
     avatar_cache_retention_days: int = 30
+    thumbnail_cache_retention_days: int = 7
+    thumbnail_cache_max_mb: int = 64
     max_send_retries: int = 3
     send_retry_base_seconds: int = 2
     send_failure_pause_threshold: int = 3
@@ -154,6 +158,8 @@ class VoteConfig:
             raise ValueError("ai_top_n/ai_bottom_n cannot be negative")
         if self.send_failure_pause_threshold < 0:
             raise ValueError("send_failure_pause_threshold cannot be negative")
+        if self.thumbnail_cache_retention_days <= 0 or self.thumbnail_cache_max_mb <= 0:
+            raise ValueError("thumbnail cache retention and size must be positive")
         if self.avatar_cache_retention_days < 0:
             raise ValueError("avatar_cache_retention_days cannot be negative")
 

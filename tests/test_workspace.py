@@ -155,6 +155,18 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(Path(changed.project_path),other.resolve())
             self.assertEqual(probe.call_count,2)
 
+    async def test_thumbnail_disk_cache_survives_service_recreation(self):
+        from PIL import Image
+        from unittest.mock import patch
+        image=self.root/'input'/'demo'/'one.png'
+        Image.new('RGB',(48,48),'blue').save(image)
+        first=await self.service.thumbnail_async(image,240)
+        replacement=WorkspaceService(self.plugin)
+        with patch('PIL.Image.open',side_effect=AssertionError('must use disk cache')):
+            second=await replacement.thumbnail_async(image,240)
+        self.assertEqual(first,second)
+        self.assertEqual(len(list(replacement.thumbnail_cache_root.glob('*.webp'))),1)
+
     async def test_thumbnail_endpoint_reuses_one_scan_and_caches_images(self):
         """缩略图接口必须复用快照缓存并走图片缓存；这条路径曾因写错作用域整段报错。"""
         self.plugin.project_registry.register('registered', self.root/'input'/'demo')
@@ -173,7 +185,7 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scans, ['registered'])
         self.assertEqual(len(calls), 2)
 
-    async def test_preflight_embeds_thumbnails_when_pillow_is_available(self):
+    async def test_preflight_returns_metadata_before_thumbnail_decoding(self):
         try:
             import PIL  # noqa: F401
         except ImportError:
@@ -182,7 +194,8 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
         Image.new('RGB', (16,16), (80,120,160)).save(self.root/'input'/'demo'/'one.png')
         self.plugin.project_registry.register('registered', self.root/'input'/'demo')
         preview = await self.service.preview('registered')
-        self.assertTrue(str(preview['first'][0].get('thumb')).startswith('data:image/webp;base64,'))
+        self.assertNotIn('thumb',preview['first'][0])
+        self.assertFalse(self.service.thumbnail_cache_root.exists())
         endpoint = await WorkspaceAPI(self.plugin).thumbnail({'project': 'registered', 'index': 1})
         self.assertTrue(endpoint['image'].startswith('data:image/webp;base64,'))
 

@@ -163,7 +163,8 @@ class WorkspaceAPI:
         if candidate is None:
             raise FileNotFoundError('图片不存在')
         source = PathGuard(source_root).ensure_within(source_root/candidate.source_relative_path, allow_root=False)
-        return {'image': await asyncio.to_thread(self.service.thumbnail_data_uri, source)}
+        box = 240 if query.get('size') == 'preview' else 480
+        return {'image': await self.service.thumbnail_async(source, box)}
 
     async def download(self, path):
         payload = json.loads((path/'data.json').read_text())

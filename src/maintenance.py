@@ -78,3 +78,39 @@ def prune_stale_temp_dirs(bases, age_seconds: int = STALE_TEMP_SECONDS) -> int:
 def temp_scan_bases(output_root: Path, data_root: Path):
     return [(Path(output_root), ('.image-vote-',)),
             (Path(data_root) / 'temp', ('image-vote-download-',))]
+
+
+def prune_thumbnail_cache(root: Path, retention_days: int, max_mb: int) -> int:
+    root = Path(root)
+    if root.is_symlink() or not root.is_dir():
+        return 0
+    entries = []
+    removed = 0
+    now = time.time()
+    try:
+        for path in root.iterdir():
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                stat = path.stat()
+                if re.fullmatch(r'[a-f0-9]{64}\.[a-f0-9]{32}\.tmp', path.name):
+                    if stat.st_mtime < now - 86400:
+                        path.unlink(); removed += 1
+                elif re.fullmatch(r'[a-f0-9]{64}\.webp', path.name):
+                    if stat.st_mtime < now - retention_days * 86400:
+                        path.unlink(); removed += 1
+                    else:
+                        entries.append((stat.st_mtime, path, stat.st_size))
+            except OSError:
+                continue
+        total = sum(size for _, _, size in entries)
+        for _, path, size in sorted(entries):
+            if total <= max_mb * 1024 * 1024:
+                break
+            try:
+                path.unlink(); total -= size; removed += 1
+            except OSError:
+                continue
+    except OSError as exc:
+        logger.warning('缩略图缓存清理失败：%s', exc)
+    return removed

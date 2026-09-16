@@ -56,3 +56,16 @@ class PeriodicMaintenanceTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await plugin._maintenance_loop()
         plugin.run_self_maintenance.assert_awaited_once()
+
+
+class ThumbnailQuotaTest(unittest.TestCase):
+    def test_size_cap_removes_oldest_and_retains_unrelated_files(self):
+        from src.maintenance import prune_thumbnail_cache
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            old=root/('a'*64+'.webp');new=root/('b'*64+'.webp')
+            old.write_bytes(b'a'*700000);new.write_bytes(b'b'*700000)
+            stamp=time.time();os.utime(old,(stamp-100,stamp-100))
+            unrelated=root/'keep.txt';unrelated.write_text('keep')
+            self.assertEqual(prune_thumbnail_cache(root,7,1),1)
+            self.assertFalse(old.exists());self.assertTrue(new.exists());self.assertTrue(unrelated.exists())

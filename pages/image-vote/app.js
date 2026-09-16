@@ -268,7 +268,9 @@
       $("#app").classList.remove("loading");
     }
   }
+  let modalRevision = 0;
   function modal(title, html, cls = "") {
+    modalRevision++;
     const el = $("#modal");
     if (!el.open) dialogOrigin = document.activeElement;
     el.className = cls;
@@ -280,6 +282,7 @@
     $("#modal").close();
   }
   $("#modal").addEventListener("close", () => {
+    modalRevision++;
     if (dialogOrigin?.isConnected) dialogOrigin.focus();
   });
   function confirmAction(title, text, action, attrs = "") {
@@ -300,24 +303,37 @@
   }
   async function preflight(name) {
     previewProject = name;
-    modal("正在预检", "<p>读取项目图片与输出目录状态…</p>");
+    modal("预检 · " + name, `<p>正在读取图片数量、评分规则与目录状态…</p><p class="subtle">图片会在基本信息就绪后逐张加载，不影响预检。</p>`);
+    const revision = modalRevision;
+    const groupsRequest = get("groups", {}).then(groups => ({groups}), error => ({error}));
     try {
-      const [p, g] = await Promise.all([
-        get("projects/preview", { name }),
-        get("groups", { refresh: "true" }),
-      ]);
-      groupList = g;
-      if (!$("#modal").open) return;
+      const p = await get("projects/preview", {name});
+      if (!$("#modal").open || revision !== modalRevision) return;
       modal(
         "预检 · " + name,
-        `<div class="facts"><span><b>${p.character_count}</b>个人物</span><span><b>${p.count}</b>张图片</span><span><b>${(p.total_size / 1024 / 1024).toFixed(1)}</b>MB</span><span><b>${Math.ceil(p.estimated_seconds / 60)}</b>分钟</span></div><p class="subtle">人物按首次出现排序，组内保持原顺序 · 评分 ${p.score_min}–${p.score_max} · 人物间隔 ${p.interval_seconds}秒（${p.interval_source === "project" ? "项目设置" : "全局默认"}）</p><div class="project-thumbs">${p.first.map((c, i) => c.thumb ? `<img src="${c.thumb}" alt="${esc(c.display_title)}">` : `<img data-thumb-project="${esc(name)}" data-thumb-index="${i + 1}" alt="${esc(c.display_title)}">`).join("")}</div><details><summary>扫描明细</summary><p>首批：${p.first.map((c) => esc(c.source_filename)).join("、")}</p><p>末批：${p.last.map(esc).join("、")}</p><p>非图片文件：${p.invalid_files.map(esc).join("、") || "无"}</p><p>${p.warnings.map(esc).join("；")}</p></details>${!p.output_writable ? '<p class="error">输出目录不可写，请先调整路径设置。</p>' : ""}<label>目标群<select id="start-group">${g.map((x) => `<option value="${esc(x.umo)}">${esc(x.name)} · ${esc(x.id)} · ${esc(x.platform)}</option>`).join("")}</select></label>${!g.length ? '<p class="error">没有可用群，请检查 OneBot 连接与群白名单。</p>' : ""}<p id="start-error" class="error" role="alert"></p><div class="actions"><button data-action="close">返回</button><button class="primary" data-action="confirm-start" ${!g.length || !p.count || !p.output_writable ? "disabled" : ""}>开始向选定群发送图片</button></div>`,
+        `<div class="facts"><span><b>${p.character_count}</b>个人物</span><span><b>${p.count}</b>张图片</span><span><b>${(p.total_size / 1024 / 1024).toFixed(1)}</b>MB</span><span><b>${Math.ceil(p.estimated_seconds / 60)}</b>分钟</span></div><p class="subtle">人物按首次出现排序，组内保持原顺序 · 评分 ${p.score_min}–${p.score_max} · 人物间隔 ${p.interval_seconds}秒（${p.interval_source === "project" ? "项目设置" : "全局默认"}）</p><div class="project-thumbs">${p.first.map(c => `<figure class="preflight-thumb"><img data-thumb-project="${esc(name)}" data-thumb-index="${c.display_index}" data-thumb-size="preview" alt="${esc(c.display_title)}"><figcaption>图片加载中…</figcaption></figure>`).join("")}</div><details><summary>扫描明细</summary><p>首批：${p.first.map((c) => esc(c.source_filename)).join("、")}</p><p>末批：${p.last.map(esc).join("、")}</p><p>非图片文件：${p.invalid_files.map(esc).join("、") || "无"}</p><p>${p.warnings.map(esc).join("；")}</p></details>${!p.output_writable ? '<p class="error">输出目录不可写，请先调整路径设置。</p>' : ""}<label>目标群<select id="start-group" disabled><option>正在读取群列表…</option></select></label><p id="group-loading" class="subtle" role="status">群列表加载不影响图片浏览。</p><p id="start-error" class="error" role="alert"></p><div class="actions"><button data-action="close">返回</button><button class="primary" data-action="confirm-start" disabled>开始向选定群发送图片</button></div>`,
       );
+      const populatedRevision = modalRevision;
       decorateControls();
       loadThumbnails();
+      const result = await groupsRequest;
+      if (!$("#modal").open || populatedRevision !== modalRevision) return;
+      const select=$("#start-group"), status=$("#group-loading");
+      if(result.error) {
+        status.textContent="群列表读取失败："+result.error.message+"。请关闭后重试。";
+        select.innerHTML='<option>群列表不可用</option>';
+        return;
+      }
+      groupList=result.groups;
+      select.innerHTML=groupList.length ? groupList.map(g=>`<option value="${esc(g.umo)}">${esc(g.name)} · ${esc(g.id)} · ${esc(g.platform)}</option>`).join("") : '<option>没有可用群</option>';
+      select.disabled=!groupList.length;
+      status.textContent=groupList.length ? "已就绪，可开始投票，无需等待全部图片。" : "没有可用群，请检查连接与群白名单。";
+      $('[data-action="confirm-start"]').disabled=!groupList.length || !p.count || !p.output_writable;
     } catch (e) {
-      modal("预检失败", `<p class="error">${esc(e.message)}</p>`);
+      if($("#modal").open && revision===modalRevision) modal("预检失败", `<p class="error">${esc(e.message)}</p>`);
     }
   }
+
   function edit(name) {
     editProject = name || null;
     const p = projects.find((p) => p.name === name);
@@ -334,17 +350,21 @@
       `<h3>选择容器目录</h3><p class="subtle">${esc(b.path || "从允许浏览的根目录开始")}</p><div class="directory-list">${!root ? b.roots.map((r) => `<button type="button" data-root="${esc(r)}">${esc(r)}</button>`).join("") : `<button type="button" data-browse="..">返回上层</button>${b.directories.map((x) => `<button type="button" data-browse="${esc(x.relative)}">${esc(x.name)}</button>`).join("")}<button class="primary" type="button" data-choose-path="${esc(b.path)}">使用此目录</button>`}</div><p class="subtle">新增挂载目录可先在设置的「网页目录浏览根目录」中添加。</p>`;
   }
   const thumbCache = new Map();
+  const pendingThumbs = new Map();
+  let thumbnailRun=0;
   async function loadThumbnails() {
-    const nodes = [
-      ...document.querySelectorAll("[data-thumb-project],[data-thumb-session]"),
-    ];
+    const run=++thumbnailRun;
+    const nodes = [...document.querySelectorAll("#modal [data-thumb-project]"),
+      ...document.querySelectorAll("#app [data-thumb-project],#app [data-thumb-session]")];
     for (const el of nodes) {
-      if (el.dataset.loaded) continue;
+      if(run!==thumbnailRun) return;
+      if (!el.isConnected || el.dataset.loaded) continue;
       el.dataset.loaded = "yes";
       const params = el.dataset.thumbProject
         ? {
             project: el.dataset.thumbProject,
             index: el.dataset.thumbIndex || 1,
+            size: el.dataset.thumbSize || "card",
           }
         : {
             session_id: el.dataset.thumbSession,
@@ -352,15 +372,17 @@
           };
       const key = JSON.stringify(params);
       try {
-        let value = thumbCache.get(key);
+        const cached=thumbCache.get(key);
+        let value=cached && Date.now()-cached.time<60000 ? cached.value : null;
         if (!value) {
-          value = await get("thumbnail", params);
-          if (thumbCache.size > 60) thumbCache.clear();
-          thumbCache.set(key, value);
+          if(!pendingThumbs.has(key)) pendingThumbs.set(key,get("thumbnail",params).finally(()=>pendingThumbs.delete(key)));
+          value=await pendingThumbs.get(key);
+          if(thumbCache.size>=60) thumbCache.delete(thumbCache.keys().next().value);
+          thumbCache.set(key,{value,time:Date.now()});
         }
         if (el.isConnected) {
-          el.onload = () => el.parentElement.classList.add("cover-loaded");
-          el.onerror = () => { el.style.display="none"; const label=el.parentElement.querySelector(".cover-fallback"); if(label) label.textContent="图片暂不可用"; };
+          el.onload = () => { el.parentElement.classList.add("cover-loaded"); const label=el.parentElement.querySelector("figcaption"); if(label) label.textContent=el.alt; };
+          el.onerror = () => { el.style.display="none"; const label=el.parentElement.querySelector(".cover-fallback,figcaption"); if(label) label.textContent="图片暂不可用"; };
           el.src = value.image;
         }
       } catch (e) {
@@ -368,7 +390,7 @@
           el.removeAttribute("src");
           el.alt = "图片暂不可用";
           el.style.display = "none";
-          const label=el.parentElement.querySelector(".cover-fallback");
+          const label=el.parentElement.querySelector(".cover-fallback,figcaption");
           if(label) label.textContent="图片暂不可用";
         }
       }

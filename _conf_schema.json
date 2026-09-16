@@ -13,8 +13,8 @@
       "output_root": {
         "description": "报告输出根目录",
         "type": "string",
-        "default": "./data/reports",
-        "hint": "报告按 项目名/session 短ID 分目录存放，清理命令只删除本插件写入并带 marker 的报告目录。"
+        "default": "",
+        "hint": "留空时报告存入插件数据目录 reports/，与数据库、缓存集中管理；已有自定义目录继续保留，不自动迁移。"
       },
       "recursive_scan": {
         "description": "递归扫描项目子目录",
@@ -313,6 +313,18 @@
         "type": "int",
         "default": 3,
         "hint": "按消息计数：合并发送时一条消息可能包含多张图。0 表示不自动暂停；命中阈值后会在群里提示管理员，可用 /vote resume 继续。"
+      },
+      "thumbnail_cache_retention_days": {
+        "description": "工作区缩略图缓存保留天数",
+        "type": "int",
+        "default": 7,
+        "hint": "按最近使用时间清理；需大于 0。"
+      },
+      "thumbnail_cache_max_mb": {
+        "description": "工作区缩略图缓存上限（MB）",
+        "type": "int",
+        "default": 64,
+        "hint": "每次写入及定期维护时清理最久未用文件；需大于 0。"
       }
     }
   }

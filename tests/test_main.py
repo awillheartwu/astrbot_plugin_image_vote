@@ -371,3 +371,16 @@ class MainTest(unittest.TestCase):
         self.assertEqual(get_sender_display_name(event("", "黑白星")), "黑白星")
         self.assertEqual(get_sender_display_name(event(None, "黑白星")), "黑白星")
         self.assertEqual(get_sender_display_name(event("。", "黑白星", with_raw=False)), "。")
+
+
+class DefaultDataLayoutTest(unittest.TestCase):
+    def test_blank_output_resolves_under_plugin_data_without_moving_custom_path(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            with patch('main.get_plugin_data_dir',return_value=root/'plugin'):
+                plugin=ImageVotePlugin(TempContext(root),{'input_root':str(root/'images'),'output_root':''})
+                self.assertEqual(Path(plugin.settings.output_root),root/'plugin'/'reports')
+                plugin._apply_config({'input_root':str(root/'images'),'output_root':str(root/'custom')})
+                self.assertEqual(Path(plugin.settings.output_root),root/'custom')
+                self.assertEqual(Path(plugin.store.database_path).parent,root/'plugin')

@@ -152,6 +152,8 @@ def scan_project(project_path: Path, recursive: bool = False, session_id: str = 
     candidates = []
     for display_index, item in enumerate(parsed, start=1):
         path, relative, title, sequence, size, mtime_ns = item
+        # manifest 指定人物时，展示标题也用它，避免报告里出现带前缀与哈希的原始文件名。
+        override = character_overrides.get(path.name)
         candidates.append(
             Candidate(
                 id=_candidate_id(relative, size, mtime_ns),
@@ -159,10 +161,10 @@ def scan_project(project_path: Path, recursive: bool = False, session_id: str = 
                 display_index=display_index,
                 source_relative_path=relative,
                 source_filename=path.name,
-                display_title=title,
+                display_title=override or title,
                 sequence_number=sequence,
                 source_size=size,
-                character=character_overrides.get(path.name) or derive_character(title),
+                character=override or derive_character(title),
             )
         )
 

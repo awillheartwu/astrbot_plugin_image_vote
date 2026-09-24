@@ -81,6 +81,42 @@ class ProjectScannerTest(unittest.TestCase):
             self.assertEqual(by_name["Aurora-老年版本.png"], "Cassandra")
             self.assertEqual(by_name["Aurora-现代版本.png"], "Aurora")
 
+    def test_manifest_character_becomes_display_title(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in (
+                "u4ia_0001 - 亚伦 - 631cd9c5.png",
+                "u4ia_0002 - 安娜 - d40a1207.png",
+                "u4ia_0003 - 亚伦 - a1eaff85.png",
+                "screenshot0004 - Vess - 30279726.png",
+            ):
+                (root / name).write_bytes(b"image")
+
+            (root / "project.json").write_text(
+                json.dumps(
+                    {
+                        "files": [
+                            "u4ia_0001 - 亚伦 - 631cd9c5.png",
+                            "u4ia_0002 - 安娜 - d40a1207.png",
+                            "u4ia_0003 - 亚伦 - a1eaff85.png",
+                        ],
+                        "characters": {
+                            "亚伦": [
+                                "u4ia_0001 - 亚伦 - 631cd9c5.png",
+                                "u4ia_0003 - 亚伦 - a1eaff85.png",
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            titles = {item.source_filename: item.display_title for item in scan_project(root).candidates}
+            self.assertEqual(titles["u4ia_0001 - 亚伦 - 631cd9c5.png"], "亚伦")
+            self.assertEqual(titles["u4ia_0003 - 亚伦 - a1eaff85.png"], "亚伦")
+            self.assertEqual(titles["u4ia_0002 - 安娜 - d40a1207.png"], "u4ia_0002 - 安娜 - d40a1207")
+            self.assertEqual(titles["screenshot0004 - Vess - 30279726.png"], "Vess")
+
     def test_same_character_images_are_contiguous_by_first_appearance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

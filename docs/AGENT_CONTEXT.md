@@ -86,7 +86,7 @@ main.py + AstrBot 适配器          pages/image-vote/ 原生前端
 
 项目路径解析优先级：**projects.json 登记项 → project_alias.json 别名 → input_root 下的项目目录**。分散或深层目录可通过 `/vote register` 登记，但路径必须在容器内可访问。
 
-支持项目 `project.json` 的 `files` 顺序与 `characters` 人物映射。默认从处理后的标题提取人物，常见规则是取第一个短横线前的部分。人物按扫描时首次出现顺序排列，同一人物内部保留原图顺序。
+支持项目 `project.json` 的 `files` 顺序与 `characters` 人物映射：命中 `characters` 的图片，人物与展示标题都使用 manifest 里的名字；其余仍从处理后的标题提取人物，常见规则是取第一个短横线前的部分。人物按扫描时首次出现顺序排列，同一人物内部保留原图顺序。
 
 ### 发送与投票窗口
 

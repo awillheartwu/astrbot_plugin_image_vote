@@ -67,7 +67,7 @@
 | --- | --- |
 | 发送重试退避 | 实现为 2 / 4 / 6 秒（需求写 2 / 5 / 10） |
 | 单文件超限回退通知 | 写日志与报告页说明，不回群消息 |
-| 项目内 `project.json` 的 `name` / `sort_mode` | 未实现；支持 `files` 顺序与 `characters` 映射 |
+| 项目内 `project.json` 的 `name` / `sort_mode` | 未实现；支持 `files` 顺序与 `characters` 映射，命中 `characters` 的图片同时使用 manifest 里的人物名作为展示标题 |
 | 扫描忽略报告输出目录 | 未实现；`output_root` 放在项目目录内时会被扫到 |
 | 报告重新导出 | 同一场次同一时间只允许一次导出；旧报告是静态快照，新样式不会自动回溯 |
 

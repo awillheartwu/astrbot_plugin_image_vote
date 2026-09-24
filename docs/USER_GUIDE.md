@@ -11,7 +11,7 @@ volumes:
 
 把 input_root 设为 `/vote/projects`。output_root 留空可使用插件数据目录 reports/；需要单独挂载时配置可写的容器路径。容器不可见的 NAS 路径无法使用。
 
-人物按扫描时首次出现顺序分组，组内保留图片顺序。`project.json` 支持 `files` 顺序与 `characters` 人物映射。项目登记优先于别名和输入根目录，并可覆盖间隔、递归设置与说明。
+人物按扫描时首次出现顺序分组，组内保留图片顺序。`project.json` 支持 `files` 顺序与 `characters` 人物映射；被 `characters` 命中的图片，展示标题也使用 manifest 里的人物名。项目登记优先于别名和输入根目录，并可覆盖间隔、递归设置与说明。
 
 ## 评分与发送
 

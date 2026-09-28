@@ -15,7 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .ai_summary_service import build_statistics_prompt, build_summary_statistics
-from .character_service import character_of
+from .character_service import character_of, image_selection_label
 from .config import VoteConfig
 from .logging_utils import get_logger
 from .maintenance import prune_thumbnail_cache
@@ -248,6 +248,8 @@ class WorkspaceService:
             parent = parent.parent
         first_rows = [asdict(candidate) for candidate in snapshot.candidates[:6]]
         return {'name': snapshot.project_name, 'count': len(snapshot.candidates), 'character_count': character_count, 'total_size': snapshot.total_size,
+                'image_selection': image_selection_label(self.plugin.settings.max_images_per_character,
+                                                         self.plugin.settings.random_select_character_images),
                 'sort_mode': snapshot.sort_mode, 'warnings': list(snapshot.warnings),
                 'invalid_files': list(snapshot.invalid_files),
                 'first': first_rows,

@@ -44,6 +44,18 @@
         "default": 20,
         "hint": "同一人物的图片连续发送、不等待；该人物最后一张发送完成后，等待这么多秒再开始下一个人物。"
       },
+      "max_images_per_character": {
+        "description": "每个人物最多发送几张图片",
+        "type": "int",
+        "default": 0,
+        "hint": "0 表示不限；例如填 3，每个人物最多展示 3 张，不足 3 张则全部展示。只影响新建投票，逐张和合并发送均生效。"
+      },
+      "random_select_character_images": {
+        "description": "随机挑选人物图片",
+        "type": "bool",
+        "default": false,
+        "hint": "超过每个人物图片上限时，不重复随机抽取；关闭则取原排序前 N 张。入选图片保持原相对顺序，开始投票时抽选并保存，暂停、重试与重启不会重新抽选；0 不限时无影响。"
+      },
       "merge_character_images": {
         "description": "同一人物的多张图合并成一条消息发送",
         "type": "bool",

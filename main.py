@@ -72,6 +72,7 @@ PillowImageProcessor = _image_processor_module.PillowImageProcessor
 AiSummaryService = _ai_module.AiSummaryService
 SessionStatus = _models_module.SessionStatus
 character_layout = _character_service_module.character_layout
+image_selection_label = _character_service_module.image_selection_label
 status_label = _models_module.status_label
 get_logger = _logging.get_logger
 
@@ -732,6 +733,7 @@ class ImageVotePlugin(Star):
             "路径：%s" % self._project_path_label(snapshot.project_path, project_name),
             "图片：%d（带序号 %d，普通命名 %d）" % (len(snapshot.candidates), numbered, plain),
             character_line,
+            image_selection_label(self.settings.max_images_per_character, self.settings.random_select_character_images),
             "原始总大小：%.1f MB" % (snapshot.total_size / (1024.0 * 1024.0)),
             "排序方式：%s" % snapshot.sort_mode,
             "评分范围：%d-%d" % (self.settings.score_min, self.settings.score_max),
@@ -836,6 +838,7 @@ class ImageVotePlugin(Star):
             "已重新读取配置（来源：%s）\n"
             "发送间隔：%d 秒\n"
             "发送方式：%s\n"
+            "图片抽选：%s\n"
             "最后一张额外等待：%d 秒\n"
             "评分范围：%d-%d\n"
             "重复投票：%s\n"
@@ -846,6 +849,7 @@ class ImageVotePlugin(Star):
                 self._config_source,
                 settings.default_interval_seconds,
                 self._send_mode_label(),
+                image_selection_label(settings.max_images_per_character, settings.random_select_character_images),
                 settings.effective_final_grace_seconds,
                 settings.score_min,
                 settings.score_max,

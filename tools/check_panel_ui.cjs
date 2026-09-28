@@ -74,7 +74,7 @@ function bridgeScript() {
         if (endpoint === 'providers') return respond(payload.providers);
         if (endpoint === 'groups') return window.__holdGroups ? new Promise(resolve=>window.__groupWaiters.push(()=>resolve({status:'ok',data:payload.groups}))) : respond(payload.groups);
         if (endpoint === 'projects/preview') {
-          const data={name:params.name,character_count:1,count:3,total_size:30000,estimated_seconds:20,score_min:1,score_max:4,interval_seconds:20,interval_source:'global',output_writable:true,first:[{display_index:1,display_title:'Preview',source_filename:'1.png'}],last:['3.png'],invalid_files:[],warnings:[]};
+          const data={image_selection:'每个人物最多 3 张，不重复随机抽选；开始投票时确定，预览为原图库',name:params.name,character_count:1,count:3,total_size:30000,estimated_seconds:20,score_min:1,score_max:4,interval_seconds:20,interval_source:'global',output_writable:true,first:[{display_index:1,display_title:'Preview',source_filename:'1.png'}],last:['3.png'],invalid_files:[],warnings:[]};
           return window.__holdPreview ? new Promise(resolve=>window.__previewWaiters.push(()=>resolve({status:'ok',data}))) : respond(data);
         }
         if (endpoint === 'thumbnail') return window.__holdThumbs ? new Promise(resolve=>window.__thumbWaiters.push(()=>resolve({status:'ok',data:{image:payload.svg}}))) : respond({ image: payload.svg });
@@ -132,6 +132,10 @@ function bridgeScript() {
             name + ' ' + width + 'px ' + page + ' 横向溢出 ' + overflow.scrollWidth + ' > ' + overflow.innerWidth + '（' + overflow.offenders.join(', ') + '）',
           );
           if (shotsDir) await tab.screenshot({ path: path.join(shotsDir, theme + '-' + name + '-' + page + '-' + width + '.png'), fullPage: true });
+          if(name==='rich' && page==='settings') {
+            assert.equal(await tab.locator('[data-field="max_images_per_character"]').inputValue(), '0');
+            assert.equal(await tab.locator('[data-field="random_select_character_images"]').isChecked(), false);
+          }
           if(name==='rich' && page==='projects') {
             assert.equal(await tab.locator('.project-card').count(),3);
             await tab.locator('#project-search').fill('帝国');
@@ -149,6 +153,7 @@ function bridgeScript() {
             await tab.evaluate(()=>{window.__holdGroups=true;window.__holdThumbs=true;});
             await tab.locator('[data-action="preflight"]').first().click();
             await tab.locator('#modal .facts').waitFor();
+            assert.match(await tab.locator('#modal').innerText(), /最多 3 张.*随机抽选.*预览为原图库/);
             assert.equal(await tab.locator('#modal [data-action="confirm-start"]').isDisabled(),true);
             await tab.waitForFunction(()=>window.__thumbWaiters.length>0);
             assert.equal(await tab.locator('#modal .preflight-thumb img').getAttribute('src'),null);

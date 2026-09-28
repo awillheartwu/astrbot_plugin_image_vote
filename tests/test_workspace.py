@@ -42,6 +42,16 @@ class FailingConfigObject(dict):
 
 
 class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_preview_explains_selection_without_sampling(self):
+        self.plugin.settings = VoteConfig.from_mapping({**dict(self.config), 'voting': {
+            'max_images_per_character': 3, 'random_select_character_images': True,
+        }})
+        result = await self.service.preview('demo')
+        self.assertIn('最多 3 张', result['image_selection'])
+        self.assertIn('不重复随机抽选', result['image_selection'])
+        self.assertIn('预览为原图库', result['image_selection'])
+        self.assertEqual(result['count'], 1)
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = self.root = Path(self.temp.name)

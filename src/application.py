@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional, Sequence
 
 from .config import VoteConfig
-from .character_service import character_layout, character_of
+from .character_service import character_layout, character_of, select_character_images
 from .ai_summary_service import AiSummaryService, build_summary_statistics
 from .logging_utils import get_logger
 from .models import Candidate, SendContext, SendStatus, Session, SessionStatus, Vote, VoteDecision
@@ -86,6 +86,9 @@ class VoteApplication:
         snapshot = self.projects.inspect(project_name, recursive)
         if not snapshot.candidates:
             raise ValueError("project contains no supported images")
+        selected = select_character_images(
+            snapshot.candidates, self.config.max_images_per_character, self.config.random_select_character_images,
+        )
         output_root = Path(self.config.output_root).expanduser()
         output_root.mkdir(parents=True, exist_ok=True)
         if not output_root.is_dir() or not os.access(str(output_root), os.W_OK):
@@ -104,8 +107,8 @@ class VoteApplication:
             final_grace_seconds=max(self.config.effective_final_grace_seconds, interval_seconds),
             score_min=self.config.score_min,
             score_max=self.config.score_max,
-            candidate_count=len(snapshot.candidates),
-            character_count=len({character_of(item) for item in snapshot.candidates}),
+            candidate_count=len(selected),
+            character_count=len({character_of(item) for item in selected}),
             created_at=utc_now(),
         )
         candidates = tuple(
@@ -120,7 +123,7 @@ class VoteApplication:
                 source_size=item.source_size,
                 character=item.character,
             )
-            for item in snapshot.candidates
+            for item in selected
         )
         await self.store.save_session(session)
         await self.store.save_candidates(candidates)

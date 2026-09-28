@@ -16,6 +16,17 @@
 10. NAS 部署走 `tools/deploy_nas.sh`（bundle + `merge --ff-only` + 重载 + 日志核对）；脚本默认部署当前分支，可用 `REF=main tools/deploy_nas.sh` 指定，重载需要环境变量 `ASTRBOT_PASSWORD`。部署仍属独立授权动作，不由 git push 触发。
 11. 返回 dev 继续后续开发。发现已发布问题时追加修复提交和新版本，不移动已发布标签。
 
+## 每次开发完成后的收尾清单
+
+1. **确认范围和工作区**：保留无关修改；按需求完成正常路径、失败路径和恢复。NAS 试部署与正式双仓库发布分别确认授权；不因历史发布授权而自动发布新任务。先只部署测试版时，可提交 dev 后独立部署，不必提前发布 main/tag。
+2. **验证并保留证据**：使用带 Pillow 的 Python 3.12 运行单元测试；运行改动相关的面板／报告浏览器检查。配置、安装或持久化链路变化时，补隔离 HTTP 和旧库迁移／重开验证。测试必须使用临时数据；真实 QQ 验收另记，不能用单元测试替代。
+3. **同步文档**：更新 README 的使用说明、USER_GUIDE 的配置语义、CHANGELOG 和 IMPLEMENTATION_STATUS 的验证范围。未完成或待真实环境验证的内容记录到 ROADMAP，保留历史记录。版本只改 metadata.yaml。
+4. **提交和发布**：按职责分类 Conventional Commits，检查暂存差异与敏感文件。fetch 两端并确认没有远端独有提交；main 只快进 dev；按 HEAD、带说明标签分别做干净归档检查。保留 ZIP、SHA256、检查输出。
+5. **明确推送目标**：本仓库 origin 可能有多个 push URL，正式发布用明确的 GitHub URL 和 Forgejo remote 分别推送 main、dev、本次标签；用 `ls-remote` 核对三者提交一致。失败只补失败目标，不强推、不移动已发布标签。
+6. **NAS 部署前准备**：检查 NAS 工作区、当前版本和活动场次；数据库结构变化前，用 SQLite backup 保存一致性备份并保存插件配置，备份仅留 NAS 私有目录。历史报告与原图不作为清理对象；记录旧提交以备回退。
+7. **部署与重载分开验收**：`REF=main tools/deploy_nas.sh` 仅快进。缺少 `ASTRBOT_PASSWORD` 时脚本只能完成代码传输，须通过已登录面板单独重载，确认启用状态、新版本及加载日志；不能把脚本退出 0 当成已经重载。不得为重载而重启整个机器人容器。
+8. **最终交接**：返回 dev，确认工作区、两端分支／标签、NAS 提交与运行版本。说明配置默认值、用户如何测试、实际完成的验证和待办；移除本次创建且已无用的临时产物，不删除用户数据、历史报告或需要保留的发行归档。插件市场首次上架、账户注册等另需明确请求，不是每次收尾的自动步骤。
+
 ## 分发内容
 
 `.gitattributes` 的 export-ignore 从 Git 归档中排除原型、设计图片、测试、工具、开发文档；这些仍留在源码仓库。ZIP 保留 main.py、src、pages、assets、metadata.yaml、配置 schema、requirements、README、CHANGELOG、LICENSE 和 logo。

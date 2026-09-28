@@ -21,7 +21,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REF="${REF:-$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD)}"
+REF="${REF:-${1:-$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD)}}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/lirating_nas}"
 SSH_HOST="${SSH_HOST:-loicawu@192.168.2.198}"
 SSH_PORT="${SSH_PORT:-9707}"
@@ -45,6 +45,10 @@ say "3/4 核对远端文件"
 ssh -i "$SSH_KEY" -p "$SSH_PORT" -o BatchMode=yes "$SSH_HOST" "cd '$PLUGIN_DIR' && git log --oneline -1 && grep -E '^version' metadata.yaml && git status --porcelain | wc -l"
 
 say "4/4 重载插件并检查日志"
+if [ -z "${ASTRBOT_PASSWORD:-}" ]; then
+  say "代码已部署：${COMMIT}（${VERSION}）；未重载：请在已登录面板重载并确认版本"
+  exit 0
+fi
 python3 - "$ASTRBOT_BASE" "$VERSION" <<'PY'
 import json, sys, time, urllib.error, urllib.request
 
@@ -67,6 +71,8 @@ _, body = call('/api/auth/login', {'username': 'astrbot', 'password': password})
 token = json.loads(body)['data']['token']
 _, body = call('/api/v1/plugins/reload', {'plugin_id': 'astrbot_plugin_image_vote'}, token=token, method='POST')
 print('重载响应：' + body[:120])
+if json.loads(body).get('status') != 'ok':
+    raise SystemExit('插件重载失败，请检查面板响应')
 time.sleep(5)
 _, logs = call('/api/v1/logs/history?limit=200', token=token)
 payload = json.loads(logs)
@@ -78,7 +84,7 @@ errors = [line for line in lines if 'astrbot_plugin_image_vote' in line and ('ER
 print('加载日志：' + (loaded[-1][:160] if loaded else '未在最近日志中找到加载行'))
 print('插件报错行：%d' % len(errors))
 if version not in (loaded[-1] if loaded else ''):
-    print('注意：日志中的版本与本次部署版本不一致，请确认重载是否生效')
+    raise SystemExit('未确认新版加载日志，请在面板核对运行版本')
 PY
 
 say "完成：${COMMIT}（${VERSION}）已部署并重载"

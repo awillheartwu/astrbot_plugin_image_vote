@@ -4,6 +4,7 @@ import asyncio
 import os
 import secrets
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +14,7 @@ from .config import VoteConfig
 from .character_service import character_layout, character_of, select_character_images
 from .ai_summary_service import AiSummaryService, build_summary_statistics
 from .logging_utils import get_logger
-from .models import Candidate, SendContext, SendStatus, Session, SessionStatus, Vote, VoteDecision
+from .models import Candidate, ImageSelectionSnapshot, SendContext, SendStatus, Session, SessionStatus, Vote, VoteDecision
 from .path_guard import PathGuard
 from .persistence import SQLiteStore
 from .project_service import ProjectService
@@ -110,6 +111,13 @@ class VoteApplication:
             candidate_count=len(selected),
             character_count=len({character_of(item) for item in selected}),
             created_at=utc_now(),
+            image_selection=ImageSelectionSnapshot(
+                original_count=len(snapshot.candidates),
+                character_counts=dict(Counter(character_of(item) for item in snapshot.candidates)),
+                maximum=self.config.max_images_per_character,
+                random_select=self.config.random_select_character_images,
+                show_details=self.config.show_image_selection_details,
+            ),
         )
         candidates = tuple(
             Candidate(

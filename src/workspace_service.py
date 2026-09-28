@@ -20,6 +20,7 @@ from .config import VoteConfig
 from .logging_utils import get_logger
 from .maintenance import prune_thumbnail_cache
 from .models import SessionStatus
+from .message_sender import build_start_summary
 from .path_guard import PathGuard
 from .report_generator import REPORT_MARKER, PLUGIN_NAME
 from .statistics_service import calculate_statistics
@@ -369,6 +370,11 @@ class WorkspaceService:
             if previous and previous.status in {SessionStatus.PREPARING, SessionStatus.RUNNING, SessionStatus.PAUSED, SessionStatus.FINALIZING}:
                 raise ValueError('这个群已有未结束的投票，请先继续、结束或取消')
             session = await self.app.start_session(group['id'], group['umo'], str(body.get('project', '')))
+            if session.image_selection and session.image_selection.show_details and self.app.notifier:
+                try:
+                    await self.app.notifier(session.umo, build_start_summary(session))
+                except Exception as exc:
+                    logger.warning('开场说明发送失败（投票已启动）：%s', exc)
             return {'session_id': session.id}
 
     async def control(self, body):

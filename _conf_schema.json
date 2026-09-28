@@ -56,6 +56,12 @@
         "default": false,
         "hint": "超过每个人物图片上限时，不重复随机抽取；关闭则取原排序前 N 张。入选图片保持原相对顺序，开始投票时抽选并保存，暂停、重试与重启不会重新抽选；0 不限时无影响。"
       },
+      "show_image_selection_details": {
+        "description": "投票消息显示原图数量与抽选说明",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后，开场显示原始图片总数、每人物上限和抽选方式；图片消息显示该人物原有截图数与本轮展示数。只影响新建投票，原始数量和规则随场次保存，恢复时不会改变。"
+      },
       "merge_character_images": {
         "description": "同一人物的多张图合并成一条消息发送",
         "type": "bool",

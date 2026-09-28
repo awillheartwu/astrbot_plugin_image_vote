@@ -78,6 +78,15 @@ class SendContext:
     group_total: int = 1
 
 
+@dataclass(frozen=True)
+class ImageSelectionSnapshot:
+    original_count: int
+    character_counts: Dict[str, int]
+    maximum: int = 0
+    random_select: bool = False
+    show_details: bool = False
+
+
 @dataclass
 class Session:
     id: str
@@ -102,6 +111,7 @@ class Session:
     finished_at: Optional[str] = None
     ai_summary: Optional[str] = None
     error_message: Optional[str] = None
+    image_selection: Optional[ImageSelectionSnapshot] = None
 
 
 @dataclass

@@ -135,6 +135,7 @@ function bridgeScript() {
           if(name==='rich' && page==='settings') {
             assert.equal(await tab.locator('[data-field="max_images_per_character"]').inputValue(), '0');
             assert.equal(await tab.locator('[data-field="random_select_character_images"]').isChecked(), false);
+            assert.equal(await tab.locator('[data-field="show_image_selection_details"]').isChecked(), false);
           }
           if(name==='rich' && page==='projects') {
             assert.equal(await tab.locator('.project-card').count(),3);

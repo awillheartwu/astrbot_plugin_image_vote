@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from dataclasses import asdict
 import re
 import sqlite3
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from .logging_utils import get_logger
-from .models import Candidate, SendStatus, Session, SessionStatus, Vote, VoteSource
+from .models import Candidate, ImageSelectionSnapshot, SendStatus, Session, SessionStatus, Vote, VoteSource
 
 
 logger = get_logger()
@@ -122,6 +124,7 @@ class SQLiteStore:
                 ("active_candidate_id", "ALTER TABLE sessions ADD COLUMN active_candidate_id TEXT"),
                 ("active_character", "ALTER TABLE sessions ADD COLUMN active_character TEXT"),
                 ("character_count", "ALTER TABLE sessions ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0"),
+                ("image_selection_json", "ALTER TABLE sessions ADD COLUMN image_selection_json TEXT"),
             ),
             "candidates": (
                 ("character_name", "ALTER TABLE candidates ADD COLUMN character_name TEXT"),
@@ -212,8 +215,8 @@ class SQLiteStore:
                 id, short_id, group_id, umo, project_name, project_path, status,
                 interval_seconds, final_grace_seconds, score_min, score_max,
                 active_candidate_id, active_character, current_index, candidate_count, character_count,
-                output_path, created_at, started_at, finished_at, ai_summary, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                output_path, created_at, started_at, finished_at, ai_summary, error_message, image_selection_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 project_name=excluded.project_name,
@@ -254,6 +257,7 @@ class SQLiteStore:
                 session.finished_at,
                 session.ai_summary,
                 session.error_message,
+                json.dumps(asdict(session.image_selection), ensure_ascii=False) if session.image_selection else None,
             ),
         )
         connection.commit()
@@ -480,6 +484,7 @@ class SQLiteStore:
             finished_at=row["finished_at"],
             ai_summary=row["ai_summary"],
             error_message=row["error_message"],
+            image_selection=ImageSelectionSnapshot(**json.loads(row["image_selection_json"])) if row["image_selection_json"] else None,
         )
 
     def _require_connection(self) -> sqlite3.Connection:

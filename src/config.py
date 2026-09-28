@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
     "merge_character_images_max": 3,
     "max_images_per_character": 0,
     "random_select_character_images": False,
+    "show_image_selection_details": False,
     "send_timeout_seconds": 90,
     "score_min": 1,
     "score_max": 4,
@@ -79,6 +80,7 @@ class VoteConfig:
     merge_character_images_max: int = 3
     max_images_per_character: int = 0
     random_select_character_images: bool = False
+    show_image_selection_details: bool = False
     send_timeout_seconds: int = 90
     score_min: int = 1
     score_max: int = 4
@@ -136,6 +138,8 @@ class VoteConfig:
             raise ValueError("max_images_per_character must be a non-negative integer")
         if type(self.random_select_character_images) is not bool:
             raise ValueError("random_select_character_images must be a boolean")
+        if type(self.show_image_selection_details) is not bool:
+            raise ValueError("show_image_selection_details must be a boolean")
         validate_prompt_template(self.ai_prompt_template)
         if self.score_min < 0 or self.score_max > 100 or self.score_min > self.score_max:
             raise ValueError("score_min/score_max must satisfy 0 <= min <= max <= 100")

@@ -67,6 +67,7 @@ SessionNotFoundError = _session_manager_module.SessionNotFoundError
 VoteParser = _vote_collector_module.VoteParser
 VoteRouter = _vote_collector_module.VoteRouter
 MessageSender = _message_sender_module.MessageSender
+build_start_summary = _message_sender_module.build_start_summary
 DirectoryReportGenerator = _report_generator_module.DirectoryReportGenerator
 PillowImageProcessor = _image_processor_module.PillowImageProcessor
 AiSummaryService = _ai_module.AiSummaryService
@@ -488,11 +489,9 @@ class ImageVotePlugin(Star):
             )
             yield self._plain_result(
                 event,
-                "已开始投票：%s\n人物数量：%d，图片数量：%d\n发送方式：%s\n人物间隔：%d 秒\n评分范围：%d-%d\n预计耗时：%s"
+                "%s\n发送方式：%s\n人物间隔：%d 秒\n评分范围：%d-%d\n预计耗时：%s"
                 % (
-                    session.project_name,
-                    session.character_count,
-                    session.candidate_count,
+                    build_start_summary(session),
                     self._send_mode_label(),
                     session.interval_seconds,
                     self.settings.score_min,

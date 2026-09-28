@@ -7,6 +7,20 @@ from typing import Awaitable, Callable, Optional, Sequence
 from .models import Candidate, SendContext, Session
 
 
+def build_start_summary(session: Session) -> str:
+    selection = session.image_selection
+    if not selection or not selection.show_details:
+        return "已开始投票：%s\n人物数量：%d，图片数量：%d" % (
+            session.project_name, session.character_count, session.candidate_count,
+        )
+    rule = "不限张数，全部展示" if selection.maximum == 0 else "每人物最多 %d 张，%s" % (
+        selection.maximum, "随机抽选" if selection.random_select else "按原排序选取",
+    )
+    return "已开始投票：%s\n共 %d 个人物 · 原有 %d 张截图\n本轮规则：%s\n本轮展示：%d 张\n" % (
+        session.project_name, session.character_count, selection.original_count, rule, session.candidate_count,
+    )
+
+
 def build_vote_message(session: Session, candidate: Candidate, context: Optional[SendContext] = None) -> str:
     """群里的投票消息：首行只放「项目 · 人物」，第二行给进度，第三行是打分方法，
     最后一行才是引用投票的定位标记（见 reply_resolver 的 VOTE_MARKER_RE）。
@@ -16,10 +30,21 @@ def build_vote_message(session: Session, candidate: Candidate, context: Optional
     """
     context = context or candidate.send_context or SendContext()
     character = candidate.character or candidate.display_title
+    position = _position_line(context)
+    selection = session.image_selection
+    if selection and selection.show_details and character in selection.character_counts:
+        original = selection.character_counts[character]
+        detail = "原有 %d 张，%s" % (
+            original, "本轮全部展示" if original == context.image_count else "本轮展示 %d 张" % context.image_count,
+        )
+        head = "第 %d/%d 位人物" % (context.character_ordinal, context.character_total) if context.character_total > 1 else "本场唯一人物"
+        span = "本条展示全部 %d 张" % context.image_count if context.image_span >= context.image_count and context.image_span > 1 else _image_span(context)
+        marker = _progress_marker(context) or "本人物已发完"
+        position = "%s · %s\n%s · %s" % (head, detail, span, marker)
     return "\n".join(
         [
             "%s · %s" % (session.project_name, character),
-            _position_line(context),
+            position,
             "回复 %d-%d 给「%s」打分 · 引用本场任意图片可改分"
             % (session.score_min, session.score_max, character),
             "[投票 %03d/%03d · %s]" % (candidate.display_index, session.candidate_count, session.short_id),

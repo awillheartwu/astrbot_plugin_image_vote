@@ -72,6 +72,7 @@ class CharacterSelectionTest(unittest.TestCase):
             config = VoteConfig.from_mapping({
                 'input_root': str(root / 'input'), 'output_root': str(root / 'out'),
                 'max_images_per_character': 3, 'random_select_character_images': True,
+                'show_image_selection_details': True,
                 'merge_character_images': merged, 'merge_character_images_max': 2,
             })
             projects = ProjectService(root / 'input')
@@ -112,6 +113,10 @@ class CharacterSelectionTest(unittest.TestCase):
             self.assertEqual([len(paths) for paths, _ in calls], [2, 2] if merged else [1, 1, 1, 1])
             self.assertEqual((calls[0][1].image_ordinal, calls[0][1].image_count), (2, 3))
             persisted = await store.get_session(session.id)
+            self.assertEqual(persisted.image_selection.original_count, 12)
+            self.assertEqual(persisted.image_selection.character_counts, {'A': 10, 'B': 2})
+            self.assertEqual(persisted.image_selection.maximum, 3)
+            self.assertTrue(persisted.image_selection.show_details)
             self.assertEqual((persisted.status, persisted.current_index), (SessionStatus.COMPLETED, 5))
             candidates = await store.list_candidates(session.id)
             persisted.status = SessionStatus.RUNNING

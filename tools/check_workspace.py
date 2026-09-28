@@ -29,6 +29,11 @@ def check(source):
         post('config',{'revision':'stale','values':{}},409)
         post('config',{'revision':original['revision'],'values':{'score_max':True}},400)
         checked.append('authorization, origin, optimistic config revision, JSON type validation')
+        post('config', {'revision': original['revision'], 'values': {
+            'show_image_selection_details': True, 'max_images_per_character': 1,
+            'random_select_character_images': True,
+        }})
+        assert get('config')['values']['show_image_selection_details'] is True
         project=get('projects')[0]
         registered=post('projects/register',{'name':'验收项目','path':project['path'],'interval_seconds':20,'recursive':False})
         assert any(p['name']=='验收项目' for p in registered)
@@ -43,6 +48,11 @@ def check(source):
         assert len(groups)==2
         first=post('sessions/start',{'project':'验收项目','umo':groups[0]['umo']})['session_id']
         second=post('sessions/start',{'project':'验收项目','umo':groups[1]['umo']})['session_id']
+        import asyncio
+        saved = asyncio.run(app.state.plugin.store.get_session(first))
+        assert saved.image_selection.original_count == 3
+        assert saved.image_selection.show_details is True
+        assert saved.image_selection.maximum == 1
         post('sessions/start',{'project':'验收项目','umo':groups[0]['umo']},400)
         post('sessions/start',{'project':'验收项目','umo':'forged'},403)
         def wait_for(predicate):
@@ -95,7 +105,7 @@ def check(source):
         post('reports/export',{'session_id':first})
         wait_for(lambda: next(r for r in get('sessions')['sessions'] if r['id']==first)['report_state']=='ready')
         checked.append('report-only cleanup, retained originals and votes, regeneration after cleanup')
-    return {'passed':checked,'scope':'Official v4.27.5 PluginRequest/response source + real plugin services. Fake OneBot and no model calls.'}
+    return {'passed':checked,'scope':'Official PluginRequest/response source at '+str(source)+' + real plugin services. Fake OneBot and no model calls.'}
 
 
 if __name__=='__main__':

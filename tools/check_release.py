@@ -53,7 +53,7 @@ def main():
         names=archive.namelist();prefix='astrbot_plugin_image_vote/'
         for file in ['main.py','src/version.py','metadata.yaml','_conf_schema.json','LICENSE','pages/image-vote/app.js','assets/report.js','requirements.txt']:
             assert prefix+file in names,file
-        assert not any(n.startswith(prefix+p+'/') for n in names for p in ['prototypes','docs','tests','tools','.git'])
+        assert not any(n.startswith(prefix+p+'/') for n in names for p in ['prototypes','docs','tests','tools','.git','.forgejo'])
         assert len(data)<16*1024*1024,'Archive exceeds 16 MiB'
         version=re.search(r'^version:\s*(\S+)',archive.read(prefix+'metadata.yaml').decode(),re.M).group(1)
         with tempfile.TemporaryDirectory(prefix='lirating-release-') as temp:

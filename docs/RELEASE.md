@@ -12,8 +12,8 @@
 6. 创建带说明标签 `git tag -a v<版本> -m 'Release <版本>'`，再按标签运行归档检查，保留 ZIP、SHA256 与检查记录。
 7. 显式分别推送 main、dev 和本次标签到 GitHub、Forgejo；不要使用 `--tags` 或强推。两个远端不是原子事务，一端失败时记录成功端并仅补推失败端。
 8. 分别使用 `git ls-remote <仓库> refs/heads/main refs/heads/dev 'refs/tags/v<版本>^{}'` 确认两端指向本次发布提交。
-9. 发布者注册 AstrBot Cloud，并用 GitHub 仓库地址提交插件市场。NAS 部署独立授权执行，不由 git push 隐式触发。
-10. NAS 部署走 `tools/deploy_nas.sh`（bundle + `merge --ff-only` + 重载 + 日志核对）；脚本默认部署当前分支，可用 `REF=main tools/deploy_nas.sh` 指定，重载需要环境变量 `ASTRBOT_PASSWORD`。部署仍属独立授权动作，不由 git push 触发。
+9. 插件市场首次注册／上架仅在明确请求时执行。Forgejo `main` 的 push 现在会在检查通过后自动部署 NAS，因此推送 main 同时是生产部署动作；日常开发与验证留在 dev。
+10. 自动部署使用仓库 Actions Secret `ASTRO_KEY`、现有 NAS Docker Runner 和容器内快进／备份／重载／版本核对，详见 [CI.md](CI.md)。`tools/deploy_nas.sh` 保留为独立手动方式；它使用 SSH 和面板密码，不是 CI 的运行路径。
 11. 返回 dev 继续后续开发。发现已发布问题时追加修复提交和新版本，不移动已发布标签。
 
 ## 每次开发完成后的收尾清单
@@ -24,7 +24,7 @@
 4. **提交和发布**：按职责分类 Conventional Commits，检查暂存差异与敏感文件。fetch 两端并确认没有远端独有提交；main 只快进 dev；按 HEAD、带说明标签分别做干净归档检查。保留 ZIP、SHA256、检查输出。
 5. **明确推送目标**：本仓库 origin 可能有多个 push URL，正式发布用明确的 GitHub URL 和 Forgejo remote 分别推送 main、dev、本次标签；用 `ls-remote` 核对三者提交一致。失败只补失败目标，不强推、不移动已发布标签。
 6. **NAS 部署前准备**：检查 NAS 工作区、当前版本和活动场次；数据库结构变化前，用 SQLite backup 保存一致性备份并保存插件配置，备份仅留 NAS 私有目录。历史报告与原图不作为清理对象；记录旧提交以备回退。
-7. **部署与重载分开验收**：`REF=main tools/deploy_nas.sh` 仅快进。缺少 `ASTRBOT_PASSWORD` 时脚本只能完成代码传输，须通过已登录面板单独重载，确认启用状态、新版本及加载日志；不能把脚本退出 0 当成已经重载。不得为重载而重启整个机器人容器。
+7. **部署与重载分开验收**：Forgejo main 推送后跟踪 Actions 至部署成功，核对完整提交、重载响应、运行版本与启用状态。手动脚本缺少 `ASTRBOT_PASSWORD` 时仅完成代码传输，不能把退出 0 当作已重载。自动部署缺少 `ASTRO_KEY` 必须失败。不得为重载而重启整个机器人容器。
 8. **最终交接**：返回 dev，确认工作区、两端分支／标签、NAS 提交与运行版本。说明配置默认值、用户如何测试、实际完成的验证和待办；移除本次创建且已无用的临时产物，不删除用户数据、历史报告或需要保留的发行归档。插件市场首次上架、账户注册等另需明确请求，不是每次收尾的自动步骤。
 
 ## 分发内容

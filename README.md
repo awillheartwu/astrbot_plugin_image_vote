@@ -72,6 +72,8 @@
 
 ## 文档与反馈
 
+Forgejo `main` 推送通过自动检查后，会在 NAS 更新并重载插件；`dev` 只运行检查。维护者配置与故障排查见 [CI 运维](docs/CI.md)。
+
 - [使用手册](https://github.com/awillheartwu/astrbot_plugin_image_vote/blob/dev/docs/USER_GUIDE.md)：路径映射、全部命令、图片策略与 AI 配置。
 - [实现与验收状态](https://github.com/awillheartwu/astrbot_plugin_image_vote/blob/dev/docs/IMPLEMENTATION_STATUS.md)：已验证的范围与限制。
 - [更新记录](CHANGELOG.md) · [问题反馈](https://github.com/awillheartwu/astrbot_plugin_image_vote/issues)

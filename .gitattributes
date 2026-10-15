@@ -13,5 +13,6 @@
 /.gitattributes export-ignore
 /dist export-ignore
 /.github export-ignore
+/.forgejo export-ignore
 /*.zip export-ignore
 /probe-report*.txt export-ignore

@@ -1,0 +1,71 @@
+name: Verify and deploy Lirating on NAS
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Forgejo 15 queues release runs; the in-container flock is a second guard.
+concurrency:
+  group: lirating-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    # This NAS runner has Docker access: never execute untrusted fork PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, docker]
+    container:
+      image: node:24-bookworm
+    timeout-minutes: 20
+    steps:
+      - uses: https://github.com/actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare isolated Python environment
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends python3-venv
+          python3 -m venv /tmp/lirating-python
+          /tmp/lirating-python/bin/pip install -r requirements.txt PyYAML
+      - name: Validate workflow, scripts and plugin
+        run: |
+          /tmp/lirating-python/bin/python -c "import yaml; yaml.safe_load(open('.forgejo/workflows/ci.yml'))"
+          sh -n tools/ci/install-docker.sh
+          bash -n tools/deploy_nas.sh
+          node --check assets/report.js
+          node --check pages/image-vote/app.js
+          PYTHONDONTWRITEBYTECODE=1 /tmp/lirating-python/bin/python -m unittest discover -s tests -t .
+          /tmp/lirating-python/bin/python tools/check_release.py --ref HEAD
+
+  deploy:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, linux, docker]
+    container:
+      image: node:24-bookworm
+    timeout-minutes: 15
+    env:
+      DOCKER_API_VERSION: '1.43'
+      ASTRBOT_CONTAINER: ${{ vars.ASTRBOT_CONTAINER }}
+      ASTRBOT_PLUGIN_DIR: ${{ vars.ASTRBOT_PLUGIN_DIR || '/AstrBot/data/plugins/astrbot_plugin_image_vote' }}
+      ASTRBOT_DATA_DIR: ${{ vars.ASTRBOT_DATA_DIR || '/AstrBot/data' }}
+      ASTRBOT_LOCAL_BASE: ${{ vars.ASTRBOT_LOCAL_BASE || 'http://127.0.0.1:6185' }}
+    steps:
+      - uses: https://github.com/actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reuse Docker CLI from NAS cache
+        run: sh tools/ci/install-docker.sh
+      - name: Deploy exact commit, reload and verify readiness and running version
+        env:
+          ASTRO_KEY: ${{ secrets.ASTRO_KEY }}
+        run: python3 tools/ci/deploy.py

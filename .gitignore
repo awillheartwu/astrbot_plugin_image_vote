@@ -21,6 +21,9 @@ venv/
 .idea/
 .vscode/
 /qa/
+.env
+.env.*
+!.env.example
 
 # 工具生成的示例报告与打包产物
 /prototypes/image-vote/generated/

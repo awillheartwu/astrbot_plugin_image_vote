@@ -2,6 +2,12 @@
 
 工作流：`.forgejo/workflows/ci.yml`。复用在线 `nas-runner-site` 的 `self-hosted`、`linux`、`docker` 标签和自动挂载的 `/var/run/docker.sock`。Runner 可以管理宿主 Docker，只运行受信任的仓库内代码，跳过 fork PR。不需要注册新 Runner、挂载额外宿主目录或配置 SSH。
 
+## 执行平台隔离
+
+CI 与 NAS 自动部署只在 Forgejo 执行；GitHub 仅同步源码。可执行工作流统一保存在 `.forgejo/workflows/`，`.github/workflows/` 只保留 README，不添加 `.yml` 或 `.yaml`，因此向两端同步 `dev`、`main` 不会触发 GitHub Actions。
+
+Forgejo 工作流中的 `github.*` 兼容上下文与 GitHub checkout action 地址不改变执行平台。维护 CI 时只修改 `.forgejo/workflows/`，不要向 `.github/workflows/` 复制工作流。
+
 ## 触发与检查
 
 | 事件 | 自动检查 | NAS 更新／重载 |

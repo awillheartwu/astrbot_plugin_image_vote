@@ -4,7 +4,7 @@
 
 - 新增 Forgejo Actions：dev／main 和仓库内 PR 执行 Python 测试、脚本检查与干净发行包检查；只有 main push／main 手动运行在检查通过后自动部署 NAS。
 - 复用 NAS Runner 的 Docker socket，使用仓库密钥 `ASTRO_KEY` 调用 AstrBot 插件重载，无需 SSH 或面板密码；核对实际运行版本、启用状态和目标提交。
-- 部署使用容器内文件锁、工作区与活动场次检查、Git 快进、SQLite／配置私有备份。失败保留数据和诊断，不自动回滚数据库；发行 ZIP 排除 CI 文件。
+- 部署使用容器内文件锁、工作区与活动场次检查、Git 快进、SQLite／配置私有备份。失败保留数据和诊断，不自动回滚数据库；发行 ZIP 排除 CI 文件。Synology 目录继承 ACL 时额外显式 chmod 并核对备份目录权限。
 
 ## 0.13.16 - 2026-09-28
 

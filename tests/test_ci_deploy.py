@@ -203,6 +203,24 @@ class DeployWorkerTest(unittest.TestCase):
         self.assertEqual(api.calls[1][2], "/api/v1/plugins/" + PLUGIN + "/reload")
         self.assertEqual(clock.sleeps, [])
 
+    def test_backup_restricts_inherited_directory_permissions_before_writing(self):
+        data = self._create_database()
+        config = self._write_config()
+        mkdir = Path.mkdir
+
+        def inherited_mkdir(path, *args, **kwargs):
+            mkdir(path, *args, **kwargs)
+            if path.name.startswith('backup-ci-'):
+                path.chmod(0o777)
+
+        # Reproduce the NAS behavior: mkdir's mode is overridden by inherited
+        # directory permissions. The explicit chmod must restore privacy.
+        with mock.patch.object(Path, 'mkdir', autospec=True, side_effect=inherited_mkdir):
+            saved = deploy_worker.backup(data, config, self.old_revision)
+        self.assertEqual(stat.S_IMODE(saved.stat().st_mode), 0o700)
+        self.assertTrue((saved / 'vote.db').is_file())
+        self.assertEqual(stat.S_IMODE((saved / 'plugin_config.json').stat().st_mode), 0o600)
+
     def test_active_vote_session_blocks_deployment(self):
         self._checkout_deployed(self.old_revision)
         data = self._create_database(statuses=("FINISHED", "RUNNING"))

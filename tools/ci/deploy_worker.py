@@ -61,6 +61,11 @@ def backup(data, config, old_revision):
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     target = data / ('backup-ci-' + stamp)
     target.mkdir(mode=0o700)
+    # Synology can inherit directory ACLs despite mkdir(mode=0700). Apply
+    # chmod explicitly before writing anything, as for the individual files.
+    target.chmod(0o700)
+    if target.stat().st_mode & 0o777 != 0o700:
+        raise RuntimeError('Cannot restrict backup directory permissions')
     with sqlite3.connect((data / 'vote.db').resolve().as_uri() + '?mode=ro', uri=True) as src:
         with sqlite3.connect(target / 'vote.db') as dst:
             src.backup(dst)

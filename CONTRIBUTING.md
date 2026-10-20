@@ -7,6 +7,6 @@
 - Python 验证：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .`。完整图片测试需要 `pip install -r requirements.txt`。
 - 浏览器验证：`npm install --prefix /tmp/lirating-ui playwright`，然后 `NODE_PATH=/tmp/lirating-ui/node_modules node tools/check_panel_ui.cjs` 和 `node tools/check_report_ui.cjs`（第二条也需同一个 NODE_PATH）。脚本使用已安装的 Chrome，不需要下载浏览器。两套检查均默认不截图。
 - 不把单元测试、隔离 HTTP 验收等同于真实 QQ 或生产验收。修改与验证范围必须写明。
-- 发布执行 [发布流程](docs/RELEASE.md)，没有启用 CI，发布者负责运行检查并保存输出。
+- 发布执行 [发布流程](docs/RELEASE.md)；Forgejo CI 在 `dev`／`main` 和仓库内 PR 上自动检查，`main` push 在检查通过后自动部署并重载插件。推送 `main` 需要发布／部署授权，详见 [CI 运维](docs/CI.md)。
 - NAS 部署：`ASTRBOT_PASSWORD=... tools/deploy_nas.sh [ref]` 完成 bundle、`merge --ff-only`、面板重载与日志核对；默认部署当前分支，作为独立授权的手动方式。
-- Forgejo CI/CD：dev／main 和仓库内 PR 自动检查；Forgejo main push 在检查成功后自动部署、使用 `ASTRO_KEY` 重载插件。推送 main 需要发布／部署授权；详见 [CI 运维](docs/CI.md)。上条 SSH 脚本只作为手动备选。
+- 上条 SSH 脚本只作为 CI 之外的人工备选。

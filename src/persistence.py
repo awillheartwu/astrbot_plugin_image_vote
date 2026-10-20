@@ -9,19 +9,14 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from .logging_utils import get_logger
-from .models import Candidate, ImageSelectionSnapshot, SendStatus, Session, SessionStatus, Vote, VoteSource
+from .models import (
+    Candidate, ImageSelectionSnapshot, SendStatus, Session, SessionStatus, Vote, VoteSource,
+    VoteWindow, VoteWriteResult,
+)
+from .vote_timing import vote_wins
 
 
 logger = get_logger()
-
-
-"""同一用户对同一人物重复投票时的合并策略：SQL 片段按策略白名单拼接。"""
-VOTE_POLICIES = {
-    "last_wins": ("excluded.score", "1"),
-    "first_wins": ("votes.score", "0"),
-    "max_score": ("MAX(votes.score, excluded.score)", "CASE WHEN excluded.score >= votes.score THEN 1 ELSE 0 END"),
-    "min_score": ("MIN(votes.score, excluded.score)", "CASE WHEN excluded.score <= votes.score THEN 1 ELSE 0 END"),
-}
 
 
 """配置允许的最高分（config.validate 里是 100）；votes 表的 CHECK 用它，老库按这个上限重建。"""
@@ -40,6 +35,9 @@ CREATE TABLE IF NOT EXISTS votes (
     message_id TEXT,
     created_at TEXT,
     updated_at TEXT,
+    message_time TEXT,
+    message_sequence TEXT,
+    received_at TEXT,
     UNIQUE(session_id, character_name, voter_id)
 );
 CREATE INDEX IF NOT EXISTS idx_votes_session_candidate ON votes(session_id, candidate_id);
@@ -89,6 +87,14 @@ CREATE TABLE IF NOT EXISTS candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_session ON candidates(session_id);
 
+CREATE TABLE IF NOT EXISTS vote_windows (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    PRIMARY KEY(session_id, candidate_id)
+);
+
 """ + VOTES_TABLE_SCHEMA
 
 
@@ -125,12 +131,20 @@ class SQLiteStore:
                 ("active_character", "ALTER TABLE sessions ADD COLUMN active_character TEXT"),
                 ("character_count", "ALTER TABLE sessions ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0"),
                 ("image_selection_json", "ALTER TABLE sessions ADD COLUMN image_selection_json TEXT"),
+                ("time_routing", "ALTER TABLE sessions ADD COLUMN time_routing INTEGER NOT NULL DEFAULT 0"),
+                ("vote_policy", "ALTER TABLE sessions ADD COLUMN vote_policy TEXT"),
             ),
             "candidates": (
                 ("character_name", "ALTER TABLE candidates ADD COLUMN character_name TEXT"),
+                ("message_id", "ALTER TABLE candidates ADD COLUMN message_id TEXT"),
+                ("message_time", "ALTER TABLE candidates ADD COLUMN message_time TEXT"),
+                ("message_sequence", "ALTER TABLE candidates ADD COLUMN message_sequence TEXT"),
             ),
             "votes": (
                 ("character_name", "ALTER TABLE votes ADD COLUMN character_name TEXT"),
+                ("message_time", "ALTER TABLE votes ADD COLUMN message_time TEXT"),
+                ("message_sequence", "ALTER TABLE votes ADD COLUMN message_sequence TEXT"),
+                ("received_at", "ALTER TABLE votes ADD COLUMN received_at TEXT"),
             ),
         }
         for table, columns in additions.items():
@@ -189,8 +203,8 @@ class SQLiteStore:
         connection.execute("ALTER TABLE votes RENAME TO votes_legacy")
         connection.executescript(VOTES_TABLE_SCHEMA)
         connection.execute(
-            "INSERT INTO votes (id, session_id, candidate_id, character_name, voter_id, voter_name, score, source_type, message_id, created_at, updated_at)"
-            " SELECT id, session_id, candidate_id, character_name, voter_id, voter_name, score, source_type, message_id, created_at, updated_at"
+            "INSERT INTO votes (id, session_id, candidate_id, character_name, voter_id, voter_name, score, source_type, message_id, created_at, updated_at, message_time, message_sequence, received_at)"
+            " SELECT id, session_id, candidate_id, character_name, voter_id, voter_name, score, source_type, message_id, created_at, updated_at, message_time, message_sequence, received_at"
             " FROM votes_legacy"
         )
         connection.execute("DROP TABLE votes_legacy")
@@ -208,15 +222,16 @@ class SQLiteStore:
         async with self._lock:
             await asyncio.to_thread(self._save_session_sync, session)
 
-    def _save_session_sync(self, session: Session) -> None:
+    def _save_session_sync(self, session: Session, commit: bool = True) -> None:
         connection = self._require_connection()
         connection.execute(
             """INSERT INTO sessions (
                 id, short_id, group_id, umo, project_name, project_path, status,
                 interval_seconds, final_grace_seconds, score_min, score_max,
                 active_candidate_id, active_character, current_index, candidate_count, character_count,
-                output_path, created_at, started_at, finished_at, ai_summary, error_message, image_selection_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                output_path, created_at, started_at, finished_at, ai_summary, error_message, image_selection_json,
+                time_routing, vote_policy
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 project_name=excluded.project_name,
@@ -233,7 +248,9 @@ class SQLiteStore:
                 started_at=excluded.started_at,
                 finished_at=excluded.finished_at,
                 ai_summary=excluded.ai_summary,
-                error_message=excluded.error_message""",
+                error_message=excluded.error_message,
+                time_routing=excluded.time_routing,
+                vote_policy=excluded.vote_policy""",
             (
                 session.id,
                 session.short_id,
@@ -258,25 +275,32 @@ class SQLiteStore:
                 session.ai_summary,
                 session.error_message,
                 json.dumps(asdict(session.image_selection), ensure_ascii=False) if session.image_selection else None,
+                int(session.time_routing),
+                session.vote_policy,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
 
     async def save_candidates(self, candidates: Iterable[Candidate]) -> None:
         candidates_list = list(candidates)
         async with self._lock:
             await asyncio.to_thread(self._save_candidates_sync, candidates_list)
 
-    def _save_candidates_sync(self, candidates: List[Candidate]) -> None:
+    def _save_candidates_sync(self, candidates: List[Candidate], commit: bool = True) -> None:
         connection = self._require_connection()
         connection.executemany(
             """INSERT INTO candidates (
                 id, session_id, display_index, source_relative_path, source_filename,
-                display_title, sequence_number, source_size, character_name, send_status, sent_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                display_title, sequence_number, source_size, character_name, send_status, sent_at,
+                message_id, message_time, message_sequence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 send_status=excluded.send_status,
-                sent_at=excluded.sent_at""",
+                sent_at=excluded.sent_at,
+                message_id=excluded.message_id,
+                message_time=excluded.message_time,
+                message_sequence=excluded.message_sequence""",
             [
                 (
                     candidate.id,
@@ -290,18 +314,52 @@ class SQLiteStore:
                     candidate.character,
                     candidate.send_status.value,
                     candidate.sent_at,
+                    candidate.message_id,
+                    candidate.message_time,
+                    candidate.message_sequence,
                 )
                 for candidate in candidates
             ],
         )
-        connection.commit()
+        if commit:
+            connection.commit()
+
+    async def save_send_progress(self, session: Session, candidates: Iterable[Candidate], window: Optional[VoteWindow]) -> None:
+        async with self._lock:
+            await self._finish_write(self._save_send_progress_sync, session, list(candidates), window)
+
+    def _save_send_progress_sync(self, session, candidates, window) -> None:
+        with self._require_connection():
+            self._save_candidates_sync(candidates, commit=False)
+            if window is not None:
+                self._open_vote_window_sync(window, commit=False)
+            self._save_session_sync(session, commit=False)
+
+    @staticmethod
+    async def _finish_write(function, *args):
+        # A cancelled asyncio waiter does not stop SQLite's worker thread. Keep the
+        # store lock and intake guard until the real write finishes, including at cutoff.
+        task = asyncio.create_task(asyncio.to_thread(function, *args))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+            task.result()
+            raise
 
     async def upsert_vote(self, vote: Vote, policy: str = "last_wins") -> Optional[int]:
         """写入投票；同一人同一人物已有票时返回被覆盖的分数，否则返回 None。"""
-        async with self._lock:
-            return await asyncio.to_thread(self._upsert_vote_sync, vote, policy)
+        return (await self.apply_vote(vote, policy)).previous_score
 
-    def _upsert_vote_sync(self, vote: Vote, policy: str = "last_wins") -> Optional[int]:
+    async def apply_vote(self, vote: Vote, policy: str = "last_wins") -> VoteWriteResult:
+        async with self._lock:
+            return await self._finish_write(self._upsert_vote_sync, vote, policy)
+
+    def _upsert_vote_sync(self, vote: Vote, policy: str = "last_wins") -> VoteWriteResult:
         connection = self._require_connection()
         character = vote.character
         if not character:
@@ -311,24 +369,27 @@ class SQLiteStore:
             ).fetchone()
             character = str(row["name"]) if row is not None else vote.candidate_id
         previous_row = connection.execute(
-            "SELECT score FROM votes WHERE session_id = ? AND character_name = ? AND voter_id = ?",
+            "SELECT * FROM votes WHERE session_id = ? AND character_name = ? AND voter_id = ?",
             (vote.session_id, character, vote.voter_id),
         ).fetchone()
         previous = int(previous_row["score"]) if previous_row is not None else None
-        score_expression, wins_expression = VOTE_POLICIES.get(policy, VOTE_POLICIES["last_wins"])
+        if previous_row is not None and not vote_wins(vote, self._vote_from_row(previous_row), policy):
+            return VoteWriteResult(previous, False)
         connection.execute(
             """INSERT INTO votes (
                 session_id, candidate_id, character_name, voter_id, voter_name, score, source_type,
-                message_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                message_id, created_at, updated_at, message_time, message_sequence, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id, character_name, voter_id) DO UPDATE SET
                 candidate_id=excluded.candidate_id,
                 voter_name=excluded.voter_name,
-                score=%s,
-                source_type=CASE WHEN %s THEN excluded.source_type ELSE votes.source_type END,
-                message_id=CASE WHEN %s THEN excluded.message_id ELSE votes.message_id END,
-                updated_at=CASE WHEN %s THEN excluded.updated_at ELSE votes.updated_at END"""
-            % (score_expression, wins_expression, wins_expression, wins_expression),
+                score=excluded.score,
+                source_type=excluded.source_type,
+                message_id=excluded.message_id,
+                updated_at=excluded.updated_at,
+                message_time=excluded.message_time,
+                message_sequence=excluded.message_sequence,
+                received_at=excluded.received_at""",
             (
                 vote.session_id,
                 vote.candidate_id,
@@ -340,10 +401,49 @@ class SQLiteStore:
                 vote.message_id,
                 vote.created_at,
                 vote.updated_at,
+                vote.message_time,
+                vote.message_sequence,
+                vote.received_at,
             ),
         )
         connection.commit()
-        return previous
+        return VoteWriteResult(previous, True)
+
+    async def open_vote_window(self, window: VoteWindow) -> None:
+        async with self._lock:
+            await self._finish_write(self._open_vote_window_sync, window)
+
+    def _open_vote_window_sync(self, window: VoteWindow, commit: bool = True) -> None:
+        connection = self._require_connection()
+        connection.execute(
+            "INSERT OR IGNORE INTO vote_windows (session_id, candidate_id, opened_at) "
+            "SELECT ?, ?, ? WHERE NOT EXISTS "
+            "(SELECT 1 FROM vote_windows WHERE session_id=? AND closed_at IS NULL)",
+            (window.session_id, window.candidate_id, window.opened_at, window.session_id),
+        )
+        if commit:
+            connection.commit()
+
+    async def close_vote_windows(self, session_id: str, closed_at: str) -> None:
+        async with self._lock:
+            await self._finish_write(self._close_vote_windows_sync, session_id, closed_at)
+
+    def _close_vote_windows_sync(self, session_id: str, closed_at: str) -> None:
+        connection = self._require_connection()
+        connection.execute(
+            "UPDATE vote_windows SET closed_at=? WHERE session_id=? AND closed_at IS NULL",
+            (closed_at, session_id),
+        )
+        connection.commit()
+
+    async def list_vote_windows(self, session_id: str) -> List[VoteWindow]:
+        async with self._lock:
+            return await asyncio.to_thread(self._list_vote_windows_sync, session_id)
+
+    def _list_vote_windows_sync(self, session_id: str) -> List[VoteWindow]:
+        return [VoteWindow(**dict(row)) for row in self._require_connection().execute(
+            "SELECT * FROM vote_windows WHERE session_id=? ORDER BY opened_at, candidate_id", (session_id,)
+        )]
 
     async def list_votes(self, session_id: str) -> List[Vote]:
         async with self._lock:
@@ -365,22 +465,26 @@ class SQLiteStore:
     def _list_votes_sync(self, session_id: str) -> List[Vote]:
         connection = self._require_connection()
         rows = connection.execute("SELECT * FROM votes WHERE session_id = ? ORDER BY id", (session_id,)).fetchall()
-        return [
-            Vote(
-                id=row["id"],
-                session_id=row["session_id"],
-                candidate_id=row["candidate_id"],
-                voter_id=row["voter_id"],
-                voter_name=row["voter_name"],
-                score=row["score"],
-                source_type=VoteSource(row["source_type"]),
-                message_id=row["message_id"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                character=row["character_name"],
-            )
-            for row in rows
-        ]
+        return [self._vote_from_row(row) for row in rows]
+
+    @staticmethod
+    def _vote_from_row(row) -> Vote:
+        return Vote(
+            id=row["id"],
+            session_id=row["session_id"],
+            candidate_id=row["candidate_id"],
+            voter_id=row["voter_id"],
+            voter_name=row["voter_name"],
+            score=row["score"],
+            source_type=VoteSource(row["source_type"]),
+            message_id=row["message_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            character=row["character_name"],
+            message_time=row["message_time"],
+            message_sequence=row["message_sequence"],
+            received_at=row["received_at"],
+        )
 
     async def list_candidates(self, session_id: str) -> List[Candidate]:
         async with self._lock:
@@ -404,6 +508,9 @@ class SQLiteStore:
                 character=row["character_name"],
                 send_status=SendStatus(row["send_status"]),
                 sent_at=row["sent_at"],
+                message_id=row["message_id"],
+                message_time=row["message_time"],
+                message_sequence=row["message_sequence"],
             )
             for row in rows
         ]
@@ -485,6 +592,8 @@ class SQLiteStore:
             ai_summary=row["ai_summary"],
             error_message=row["error_message"],
             image_selection=ImageSelectionSnapshot(**json.loads(row["image_selection_json"])) if row["image_selection_json"] else None,
+            time_routing=bool(row["time_routing"]),
+            vote_policy=row["vote_policy"],
         )
 
     def _require_connection(self) -> sqlite3.Connection:

@@ -97,6 +97,38 @@ class MainTest(unittest.TestCase):
         self.assertEqual(ImageVotePlugin._parse_command("vote"), ("", ""))
         self.assertEqual(ImageVotePlugin._parse_command("/vote"), ("", ""))
 
+    def test_send_command_requires_admin_and_delegates_selector(self):
+        async def scenario(root):
+            plugin = ImageVotePlugin(TempContext(root))
+            await plugin.store.initialize()
+            calls = []
+
+            async def send_report(group_id, selector):
+                calls.append((group_id, selector))
+                return Session(
+                    "s1", "OLD1", "g1", "umo", "demo", "/tmp/demo",
+                    status=SessionStatus.COMPLETED,
+                )
+
+            plugin.application.send_report = send_report
+            member_event = FakeEvent("/vote send OLD1")
+            member_event.get_group_id = lambda: "g1"
+            denied = [item async for item in plugin.vote_command(member_event)]
+            self.assertIn("管理员", denied[0])
+            self.assertEqual(calls, [])
+
+            sent = [item async for item in plugin.vote_command(AdminEvent("/vote send old1"))]
+            self.assertIn("报告已发送到本群", sent[0])
+            self.assertEqual(calls, [("g1", "old1")])
+
+            usage = [item async for item in plugin.vote_command(AdminEvent("/vote send OLD1 extra"))]
+            self.assertIn("用法", usage[0])
+            self.assertEqual(calls, [("g1", "old1")])
+            await plugin.terminate()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
     def test_list_command_is_an_async_generator_response(self):
         async def scenario():
             plugin = ImageVotePlugin(FakeContext())
@@ -241,7 +273,7 @@ class MainTest(unittest.TestCase):
 
     def test_idle_group_messages_skip_repeated_store_queries(self):
         class ChatEvent:
-            message_str = "随便聊聊"
+            message_str = "3"
 
             def get_group_id(self):
                 return "g1"

@@ -2,11 +2,12 @@ import asyncio
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from src.application import VoteApplication
 from src.config import VoteConfig
-from src.models import Session, SessionStatus, Vote, VoteSource
+from src.models import MessageStamp, SendReceipt, Session, SessionStatus, Vote, VoteSource
 from src.path_guard import PathGuard
 from src.report_generator import PLUGIN_NAME, REPORT_MARKER
 from src.persistence import SQLiteStore
@@ -163,9 +164,19 @@ class ApplicationTest(unittest.TestCase):
             store = SQLiteStore(root / "state" / "vote.db")
             await store.initialize()
             calls = []
+            vote_task = None
 
             async def sender(session, candidate, image_paths):
+                nonlocal vote_task
                 calls.append((candidate.display_title, [path.name for path in image_paths]))
+                from src.application import utc_now
+                acknowledged_at = utc_now()
+                if candidate.display_index == 1:
+                    vote_task = asyncio.create_task(application.record_vote(
+                        session, candidates, "4", "u1", "Alice", candidate,
+                        stamp=MessageStamp(acknowledged_at),
+                    ))
+                return SendReceipt(acknowledged_at)
 
             application = VoteApplication(
                 config, ProjectService(input_root), store, SessionManager(), VoteRouter(), sender=sender
@@ -183,9 +194,7 @@ class ApplicationTest(unittest.TestCase):
             await asyncio.wait_for(managed.task, timeout=2)
             self.assertEqual([len(paths) for _, paths in calls], [3, 1], calls)
             self.assertEqual(calls[0][0], "Elis")
-            session.status = SessionStatus.RUNNING
-            session.active_character = "Elis"
-            await application.record_vote(session, candidates, "4", "u1", "Alice", candidates[0])
+            await vote_task
             votes = await store.list_votes(session.id)
             self.assertEqual([(vote.candidate_id, vote.character, vote.score) for vote in votes],
                              [(candidates[0].id, "Elis", 4)])
@@ -721,6 +730,93 @@ class ApplicationTest(unittest.TestCase):
             asyncio.run(scenario(Path(directory), generator, sent))
         self.assertEqual(generator.calls, 1)
         self.assertEqual(sent, [("umo", "index.html", "demo-报告.html")])
+
+    def test_send_report_resends_latest_single_html_or_selected_session(self):
+        async def scenario(root):
+            input_root = root / "projects"
+            input_root.mkdir(parents=True)
+            config = VoteConfig.from_mapping(
+                {"input_root": str(input_root), "output_root": str(root / "reports")}
+            )
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            report = root / "reports" / "demo" / "OLD1-s1"
+            report.mkdir(parents=True)
+            (report / "data.json").write_text(
+                json.dumps({"report_mode": "single_html"}), encoding="utf-8"
+            )
+            (report / "index.html").write_text("<html>corrected</html>", encoding="utf-8")
+            PathGuard.write_report_marker(report, REPORT_MARKER, PLUGIN_NAME, "s1")
+            old = Session(
+                "s1", "OLD1", "g1", "umo", "demo", "/tmp/demo",
+                status=SessionStatus.COMPLETED, output_path=str(report),
+            )
+            newest_without_report = Session(
+                "s2", "NEW2", "g1", "umo", "demo", "/tmp/demo",
+                status=SessionStatus.COMPLETED,
+            )
+            await store.save_session(old)
+            await store.save_session(newest_without_report)
+            sent = []
+
+            async def file_sender(umo, path, name):
+                sent.append((umo, Path(path).name, name, Path(path).read_text(encoding="utf-8")))
+
+            application = VoteApplication(
+                config, ProjectService(input_root), store, SessionManager(), VoteRouter(),
+                file_sender=file_sender,
+            )
+            session = await application.send_report("g1", "old1")
+            self.assertEqual(session.id, "s1")
+            self.assertEqual(
+                sent,
+                [("umo", "index.html", "demo-报告.html", "<html>corrected</html>")],
+            )
+            with self.assertRaises(FileNotFoundError):
+                await application.send_report("g1")
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
+
+    def test_send_report_packages_directory_reports_as_zip(self):
+        async def scenario(root):
+            input_root = root / "projects"
+            input_root.mkdir(parents=True)
+            config = VoteConfig.from_mapping(
+                {"input_root": str(input_root), "output_root": str(root / "reports")}
+            )
+            store = SQLiteStore(root / "state" / "vote.db")
+            await store.initialize()
+            report = root / "reports" / "demo" / "DIR1-s1"
+            (report / "images").mkdir(parents=True)
+            (report / "data.json").write_text(
+                json.dumps({"report_mode": "directory"}), encoding="utf-8"
+            )
+            (report / "index.html").write_text("<html></html>", encoding="utf-8")
+            (report / "images" / "one.webp").write_bytes(b"image")
+            PathGuard.write_report_marker(report, REPORT_MARKER, PLUGIN_NAME, "s1")
+            await store.save_session(Session(
+                "s1", "DIR1", "g1", "umo", "demo", "/tmp/demo",
+                status=SessionStatus.COMPLETED, output_path=str(report),
+            ))
+            sent = []
+
+            async def file_sender(umo, path, name):
+                with zipfile.ZipFile(path) as archive:
+                    sent.append((umo, Path(path).name, name, sorted(archive.namelist())))
+
+            application = VoteApplication(
+                config, ProjectService(input_root), store, SessionManager(), VoteRouter(),
+                file_sender=file_sender,
+            )
+            await application.send_report("g1")
+            self.assertEqual(sent[0][0:3], ("umo", "report.zip", "demo-报告.zip"))
+            self.assertEqual(sent[0][3], ["data.json", "images/one.webp", "index.html"])
+            await store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(scenario(Path(directory)))
 
     def test_consecutive_send_failures_pause_and_notify(self):
         async def scenario(root, notified):

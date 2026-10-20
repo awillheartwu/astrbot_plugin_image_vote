@@ -9,7 +9,7 @@ Lirating 是一个运行在 AstrBot 内的 QQ 群人物图片投票插件。管�
 
 - 插件标识：`astrbot_plugin_image_vote`。
 - 插件展示名：**AstrBot 人物图片投票**；报告品牌：**LIRATING**。
-- 本地仓库：`/Users/wuhaoli/projects/astrobot/lirating`。
+- 本地仓库：`~/projects/astrobot/lirating`。
 - 仓库地址：<https://github.com/awillheartwu/astrbot_plugin_image_vote>。
 - 主要使用者：组织投票的群管理员、参与评分的群成员、阅读报告的人。
 - 核心业务单位是**人物**。图片是人物的展示素材与投票来源，不单独计票或排名。
@@ -64,7 +64,7 @@ main.py + AstrBot 适配器          pages/image-vote/ 原生前端
 | `src/message_sender.py` | 群消息文案、图片组发送与重试 |
 | `src/platform_adapter.py` | 平台发送接口边界 |
 | `src/astrbot_adapter.py`、`astrbot_compat.py` | AstrBot 消息链、事件与兼容处理 |
-| `src/vote_collector.py`、`reply_resolver.py` | 评分解析、当前人物路由、引用图片定位 |
+| `src/vote_collector.py`、`reply_resolver.py` | 评分解析、原始时间/人物窗口路由、引用图片定位 |
 | `src/persistence.py` | SQLite schema、迁移、读写与票的冲突更新策略 |
 | `src/statistics_service.py`、`report_data.py` | 人物统计、参与者最终票、报告 schema v3 数据投影 |
 | `src/report_generator.py` | 派生图、目录与单文件报告、临时生成和发布 |
@@ -96,6 +96,8 @@ main.py + AstrBot 适配器          pages/image-vote/ 原生前端
 4. 最后一张发送完成后，才等待完整人物间隔；最后一个人物使用最终等待时间，且不短于人物间隔。
 5. 全部图片发送失败的人物不开普通票窗口；部分成功仍可评分。
 
+新场次同时记录人物窗口和消息原始接收时间；普通数字票按评分消息收到时已开放的人物窗口归属，不再按插件实际处理时刻的当前人物归属。人物切换前的发送空档不开放普通票；引用票按被引用图片归属，可在该人物窗口结束后补投。结算固定截止点，等待已经进入插件的收票处理完成后封存统计。
+
 默认逐张发送。开启合并后，按图片组发送；每条默认最多 3 张，超出拆条，仍属于同一个人物窗口。默认单条超时 90 秒，支持重试与连续失败自动暂停。合并发送减少消息开销，不减少图片上传字节数。
 
 固定周期配置已移除。不要恢复成“发送耗时抵扣人物投票间隔”的旧逻辑。
@@ -103,7 +105,7 @@ main.py + AstrBot 适配器          pages/image-vote/ 原生前端
 ### 计票与引用
 
 - 评分范围是 0–100 内的可配置连续整数区间，默认 1–4；支持两位数、全角数字等输入。
-- 普通数字票归属当前人物；引用本场已发送图片时归属该图片人物。
+- 新场次的普通数字票按消息原始接收时间归属人物窗口；旧场次保留原来的当前人物路由。引用本场已发送图片时归属该图片人物。
 - 同一用户对同一人物只保留一张最终票，默认后一次覆盖；可选首次、最高或最低分策略。
 - 引用定位标记带会话短 ID 和展示序号；解析失败或跨场次引用不能退回当前人物误计。
 - 暂停期间可以引用已发图片投票，具体窗口资格与配置由路由层判定。
@@ -112,7 +114,7 @@ main.py + AstrBot 适配器          pages/image-vote/ 原生前端
 
 状态包括：`IDLE / PREPARING / RUNNING / PAUSED / FINALIZING / COMPLETED / CANCELLED / FAILED`。
 
-`finish` 停止后续发送并结算；`stop` 取消并保留已有票。重启或重载后未完成场次暂停，管理员手动恢复，避免自动刷图。
+`finish` 停止后续发送并结算，等待已进入收票流程的评分落库后封存；`stop` 取消并保留已有票。重启或重载后未完成场次暂停，管理员手动恢复，避免自动刷图。该等待不包含仍被 AstrBot 外层限流队列阻塞、尚未进入插件的消息；历史回扫仍属于后续能力。
 
 ## 5. 数据与报告
 
@@ -120,7 +122,8 @@ SQLite 主要表：
 
 - `sessions`：项目、群、评分范围快照、进度、状态、当前人物、报告路径和 AI 摘要。
 - `candidates`：会话内图片快照、人物、相对路径、展示序号、发送结果。
-- `votes`：最终人物票；唯一键为 `(session_id, character_name, voter_id)`，`candidate_id` 保留最终票的来源图片。
+- `vote_windows`：新场次的人物开放/关闭窗口，用于按消息原始时间还原人物归属。
+- `votes`：最终人物票；唯一键为 `(session_id, character_name, voter_id)`，`candidate_id` 保留最终票的来源图片；同时保存原始消息时间、真实顺序和接收时间。
 
 `session_id` 是完整身份，短 ID 用于展示和引用；展示序号不是候选主键。数据库存在旧结构迁移。最终票表不等同于完整的每次改分事件日志。
 
@@ -149,7 +152,7 @@ AI 只接收结构化统计，不上传整批图片；调用失败不阻塞报�
 
 配置写回同一份 AstrBotConfig，兼容分组与扁平结构，保存有版本冲突检查。项目登记支持 `interval_seconds`、`recursive`、`description` 覆盖。API 要求当前 Dashboard 管理员账户；文件浏览受输入根、登记目录和 `web_browse_roots` 限制。
 
-常用命令：`/vote <项目名>`、`list`、`check`、`status`、`pause`、`resume`、`finish`、`stop`、`export`、`cleanup`、`purge`、`register`、`unregister`、`projects`、`reloadconfig`。完整参数和权限以 README 与 main.py 为准。
+常用命令：`/vote <项目名>`、`list`、`check`、`status`、`pause`、`resume`、`finish`、`stop`、`export`、`send`、`cleanup`、`purge`、`register`、`unregister`、`projects`、`reloadconfig`。`send` 可将最近一场或指定短 ID／session_id 的已生成报告重新发到本群：单文件报告发 HTML，目录报告打包为 ZIP；它不重新生成报告，也不调用 AI。完整参数和权限以 README 与 main.py 为准。
 
 常用默认值：人物间隔 20 秒、最终等待 20 秒、逐张发送、合并上限 3 张、发送超时 90 秒、评分 1–4、后票覆盖、目录报告、AI 摘要开启。不要把用户某一场的 0–10 分配置当成项目默认值。
 
@@ -202,7 +205,7 @@ AI 只接收结构化统计，不上传整批图片；调用失败不阻塞报�
 
 本会话上一轮对报告排版做过本地浏览器验收：目录版与单文件版，320 / 390 / 640 / 900 / 1440px，单卡和三卡不溢出、不重叠，导航与图片弹窗可用，检查了明暗主题截图。该结果来自本地示例，不代表截图中真实历史报告已被重新导出。
 
-`docs/IMPLEMENTATION_STATUS.md` 与 `docs/ARCHITECTURE.md` 已在 2026-09-16 对齐到 0.13.12；`docs/ROADMAP.md` 标注为历史路线图。历史验收记录基于不同版本，判断当前功能时仍应优先阅读代码与最新 CHANGELOG，不能把历史测试数或部署记录当成当前在线事实。
+`docs/IMPLEMENTATION_STATUS.md` 与 `docs/ARCHITECTURE.md` 已在 2026-10-21 对齐到 0.13.18；`docs/ROADMAP.md` 标注为历史路线图。历史验收记录基于不同版本，判断当前功能时仍应优先阅读代码与最新 CHANGELOG，不能把历史测试数或部署记录当成当前在线事实。
 
 接手原则：
 

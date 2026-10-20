@@ -120,7 +120,13 @@ class CharacterSelectionTest(unittest.TestCase):
             self.assertEqual((persisted.status, persisted.current_index), (SessionStatus.COMPLETED, 5))
             candidates = await store.list_candidates(session.id)
             persisted.status = SessionStatus.RUNNING
+            # This test exercises persisted selection and report statistics, not
+            # time-window routing. Keep its direct recast helper on the legacy
+            # path instead of reviving a completed session's closed windows.
+            persisted.finished_at = None
+            persisted.time_routing = False
             persisted.active_character = 'A'
+            app.vote_activity.reopen('g')
             await app.record_vote(persisted, candidates, '4', 'u', 'User', candidates[0])
             await app.record_vote(persisted, candidates, '3', 'u', 'User', candidates[1])
             votes = await store.list_votes(session.id)

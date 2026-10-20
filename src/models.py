@@ -63,6 +63,36 @@ class Candidate:
     sent_at: Optional[str] = None
     # 发送时由轮播循环写入的进度上下文，只用于拼群消息文案，不落库。
     send_context: Optional["SendContext"] = None
+    message_id: Optional[str] = None
+    message_time: Optional[str] = None
+    message_sequence: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class MessageStamp:
+    """AstrBot receipt time, plus optional platform time and real group sequence."""
+
+    received_at: str
+    message_time: Optional[str] = None
+    sequence: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class SendReceipt:
+    """Local acknowledgement time, plus the identity of the sent platform message."""
+
+    received_at: str
+    message_id: Optional[str] = None
+    message_time: Optional[str] = None
+    sequence: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class VoteWindow:
+    session_id: str
+    candidate_id: str
+    opened_at: str
+    closed_at: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +142,8 @@ class Session:
     ai_summary: Optional[str] = None
     error_message: Optional[str] = None
     image_selection: Optional[ImageSelectionSnapshot] = None
+    time_routing: bool = False
+    vote_policy: Optional[str] = None
 
 
 @dataclass
@@ -127,6 +159,15 @@ class Vote:
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     character: Optional[str] = None
+    message_time: Optional[str] = None
+    message_sequence: Optional[str] = None
+    received_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class VoteWriteResult:
+    previous_score: Optional[int]
+    accepted: bool
 
 
 @dataclass(frozen=True)

@@ -1,29 +1,36 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import secrets
 import uuid
+import zipfile
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Optional, Sequence
+from typing import Awaitable, Callable, Optional, Sequence, Union
 
 from .config import VoteConfig
 from .character_service import character_layout, character_of, select_character_images
 from .ai_summary_service import AiSummaryService, build_summary_statistics
 from .logging_utils import get_logger
-from .models import Candidate, ImageSelectionSnapshot, SendContext, SendStatus, Session, SessionStatus, Vote, VoteDecision
+from .maintenance import owned_temporary_directory
+from .models import (
+    Candidate, ImageSelectionSnapshot, MessageStamp, SendContext, SendReceipt, SendStatus,
+    Session, SessionStatus, Vote, VoteDecision, VoteSource, VoteWindow,
+)
 from .path_guard import PathGuard
 from .persistence import SQLiteStore
 from .project_service import ProjectService
 from .reply_resolver import ReplyPayload
 from .session_manager import SessionAlreadyActiveError, SessionManager, SessionNotFoundError
-from .report_generator import CleanupResult, ReportCleanupService
+from .report_generator import CleanupResult, PLUGIN_NAME, REPORT_MARKER, ReportCleanupService
 from .report_activity import ReportActivity
 from .statistics_service import calculate_statistics
 from .vote_collector import VoteRouter
+from .vote_timing import VoteActivity, after_image, resolve_window
 
 
 def utc_now() -> str:
@@ -54,7 +61,9 @@ class VoteApplication:
         store: SQLiteStore,
         sessions: SessionManager,
         router: VoteRouter,
-        sender: Optional[Callable[[Session, Candidate, Path], Awaitable[Optional[str]]]] = None,
+        sender: Optional[Callable[
+            [Session, Candidate, Sequence[Path]], Awaitable[Optional[Union[str, SendReceipt]]]
+        ]] = None,
         report_generator: Optional[object] = None,
         image_processor: Optional[object] = None,
         ai_summary_service: Optional[AiSummaryService] = None,
@@ -76,6 +85,7 @@ class VoteApplication:
         # 报告读取、生成与清理的互斥由应用层持有，网页工作区与群命令共用同一份状态。
         self.report_activity = report_activity or ReportActivity()
         self._range_warned: set = set()
+        self.vote_activity = VoteActivity()
 
     async def prepare_session(self, group_id: str, umo: str, project_name: str) -> Session:
         if self.config.allowed_group_ids and group_id not in self.config.allowed_group_ids:
@@ -111,6 +121,8 @@ class VoteApplication:
             candidate_count=len(selected),
             character_count=len({character_of(item) for item in selected}),
             created_at=utc_now(),
+            time_routing=True,
+            vote_policy=self.config.same_user_vote_policy,
             image_selection=ImageSelectionSnapshot(
                 original_count=len(snapshot.candidates),
                 character_counts=dict(Counter(character_of(item) for item in snapshot.candidates)),
@@ -175,6 +187,8 @@ class VoteApplication:
         await self._heal_project_name(session)
         session.status = SessionStatus.RUNNING
         session.started_at = session.started_at or utc_now()
+        session.finished_at = None
+        self.vote_activity.reopen(session.group_id)
         await self.store.save_session(session)
         logger.info(
             "session %s 开始轮播：从第 %d 张继续，共 %d 张，间隔 %d 秒",
@@ -204,6 +218,8 @@ class VoteApplication:
                 previous_character = character_of(candidates[index - 1]) if index > 0 else None
                 if candidate_character != previous_character:
                     # 上个人物的窗口已结束；下一人物首张成功前不接收普通数字票。
+                    if session.time_routing:
+                        await self.store.close_vote_windows(session.id, utc_now())
                     session.active_candidate_id = None
                     session.active_character = None
                     await self.store.save_session(session)
@@ -225,17 +241,23 @@ class VoteApplication:
                     for member in group
                 ]
                 started_at = asyncio.get_event_loop().time()
+                self.vote_activity.start_send(session.group_id)
                 try:
                     timeout = float(getattr(self.config, "send_timeout_seconds", 0) or 0)
                     if timeout > 0:
-                        await asyncio.wait_for(
+                        receipt = await asyncio.wait_for(
                             self.sender(session, candidate, paths), timeout=timeout
                         )
                     else:
-                        await self.sender(session, candidate, paths)
+                        receipt = await self.sender(session, candidate, paths)
+                    acknowledged_at = receipt.received_at if isinstance(receipt, SendReceipt) else utc_now()
                     for member in group:
                         member.send_status = SendStatus.SENT
-                        member.sent_at = utc_now()
+                        member.sent_at = acknowledged_at
+                        if isinstance(receipt, SendReceipt):
+                            member.message_id = receipt.message_id
+                            member.message_time = receipt.message_time
+                            member.message_sequence = receipt.sequence
                     session.active_candidate_id = candidate.id
                     session.active_character = candidate_character
                     consecutive_failures = 0
@@ -284,8 +306,12 @@ class VoteApplication:
                 )
                 if session.interval_seconds > 0 and not next_is_same_character and not is_last:
                     self._log_send_pace(session, candidate, group, elapsed)
-                await self.store.save_candidates(group)
-                await self.store.save_session(session)
+                window = (
+                    VoteWindow(session.id, candidate.id, candidate.sent_at)
+                    if session.time_routing and candidate.send_status == SendStatus.SENT else None
+                )
+                await self.store.save_send_progress(session, group, window)
+                self.vote_activity.finish_send(session.group_id)
                 limit = self.config.send_failure_pause_threshold
                 if limit and consecutive_failures >= limit:
                     await self._pause_after_send_failures(session, consecutive_failures)
@@ -301,10 +327,13 @@ class VoteApplication:
 
             session.status = SessionStatus.FINALIZING
             session.finished_at = utc_now()
+            if session.time_routing:
+                await self.store.close_vote_windows(session.id, session.finished_at)
             await self.store.save_session(session)
             logger.info("session %s 进入 FINALIZING，已发送 %d 张", session.short_id, session.current_index)
             if self.config.notify_on_finish:
                 await self._notify_cutoff(session)
+            await self.vote_activity.seal(session)
             votes = await self.store.list_votes(session.id)
             statistics = calculate_statistics(
                 candidates,
@@ -374,10 +403,16 @@ class VoteApplication:
             await self.store.save_session(session)
             logger.error("session %s 运行失败：%s", session.short_id, exc)
             raise
+        finally:
+            self.vote_activity.finish_send(session.group_id)
 
     async def _cancel_session(self, session: Session) -> None:
         session.status = SessionStatus.CANCELLED
         session.finished_at = utc_now()
+        self.vote_activity.finish_send(session.group_id)
+        if session.time_routing:
+            await self.store.close_vote_windows(session.id, session.finished_at)
+        await self.vote_activity.seal(session)
         await self.store.save_session(session)
 
     async def _pause_for_recovery(self, session: Session) -> None:
@@ -526,6 +561,68 @@ class VoteApplication:
             return await self.export_session(session.id, regenerate_ai=regenerate_ai)
         finally:
             self.report_activity.release_export(session.id)
+
+    async def send_report(self, group_id: str, selector: str = "") -> Session:
+        """重新发送本群最近一场或指定场次已经生成的报告。"""
+        if self.file_sender is None:
+            raise RuntimeError("当前平台不支持发送报告文件")
+        selector = selector.strip()
+        if selector:
+            page = await self.store.list_sessions(limit=200, group_id=group_id)
+            matches = [
+                item for item in page["sessions"]
+                if item.id == selector or item.short_id.casefold() == selector.casefold()
+            ]
+            if not matches:
+                raise FileNotFoundError("本群没有找到场次 %s" % selector)
+            session = matches[0]
+        else:
+            session = await self.store.latest_session_for_group(group_id)
+            if session is None:
+                raise FileNotFoundError("本群还没有投票记录")
+        if session.status not in {SessionStatus.COMPLETED, SessionStatus.CANCELLED}:
+            raise ValueError("该场次尚未结束，不能发送报告")
+        if not session.output_path:
+            raise FileNotFoundError("该场次尚未生成报告，请先执行 /vote export")
+
+        with self.report_activity.reading(session.id):
+            report_dir = PathGuard(Path(self.config.output_root)).ensure_report_directory(
+                Path(session.output_path), REPORT_MARKER, PLUGIN_NAME
+            )
+            marker = json.loads((report_dir / REPORT_MARKER).read_text(encoding="utf-8"))
+            if marker.get("session_id") != session.id:
+                raise PermissionError("报告与场次不匹配")
+            data_path = PathGuard(report_dir).ensure_within(report_dir / "data.json", allow_root=False)
+            if not data_path.is_file():
+                raise FileNotFoundError("报告数据文件不存在，请重新生成报告")
+            payload = json.loads(data_path.read_text(encoding="utf-8"))
+            label = "%s-报告" % session.project_name
+            if payload.get("report_mode") == "single_html":
+                html = PathGuard(report_dir).ensure_within(report_dir / "index.html", allow_root=False)
+                if not html.is_file():
+                    raise FileNotFoundError("单文件报告不存在，请重新生成报告")
+                await self.file_sender(session.umo, html, label + ".html")
+            else:
+                temporary = owned_temporary_directory(
+                    Path(self.store.database_path).parent / "temp", "image-vote-send-"
+                )
+                try:
+                    archive = Path(temporary.name) / "report.zip"
+
+                    def pack():
+                        guard = PathGuard(report_dir)
+                        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+                            for file in report_dir.rglob("*"):
+                                if file.is_file() and not file.is_symlink() and not file.name.startswith("."):
+                                    safe = guard.ensure_within(file, allow_root=False)
+                                    output.write(safe, str(file.relative_to(report_dir)))
+
+                    await asyncio.to_thread(pack)
+                    await self.file_sender(session.umo, archive, label + ".zip")
+                finally:
+                    temporary.cleanup()
+        logger.info("session %s 报告已重新发送到群 %s", session.short_id, session.group_id)
+        return session
 
     async def start_report_export(self, session_id: str, regenerate_ai: bool = False) -> None:
         """占位后把报告生成放到后台任务；生成期间拒绝重复生成、读取与清理。"""
@@ -786,13 +883,43 @@ class VoteApplication:
         active_candidate: Optional[Candidate],
         reply: Optional[ReplyPayload] = None,
         message_id: Optional[str] = None,
+        stamp: Optional[MessageStamp] = None,
+    ) -> Optional[VoteDecision]:
+        with self.vote_activity.receiving(session.group_id):
+            stamp = stamp or MessageStamp(utc_now())
+            if await self.vote_activity.wait_for_send(session.group_id):
+                candidates = await self.store.list_candidates(session.id)
+            if self.vote_activity.is_sealed(session):
+                return None
+            return await self._record_vote(
+                session, candidates, text, voter_id, voter_name, active_candidate, reply, message_id, stamp,
+            )
+
+    async def _record_vote(
+        self, session, candidates, text, voter_id, voter_name, active_candidate, reply, message_id, stamp,
     ) -> Optional[VoteDecision]:
         if not voter_id:
             return None
+        routing_session = session
+        if session.time_routing:
+            if (session.started_at and stamp.received_at < session.started_at) or (
+                session.finished_at and stamp.received_at >= session.finished_at
+            ):
+                logger.info("忽略投票：消息不在本场起止范围内（session=%s）", session.short_id)
+                return None
+            if session.status == SessionStatus.FINALIZING:
+                routing_session = replace(session, status=SessionStatus.RUNNING)
+            if reply is None:
+                windows = await self.store.list_vote_windows(session.id)
+                active_candidate = resolve_window(windows, {item.id: item for item in candidates}, stamp)
+                routing_session = replace(
+                    routing_session,
+                    active_character=character_of(active_candidate) if active_candidate is not None else None,
+                )
         if (session.score_min, session.score_max) != (self.config.score_min, self.config.score_max):
             self._warn_range_mismatch(session)
         decision, skip_reason = self.router.route_with_reason(
-            text, session, active_candidate, {item.display_index: item for item in candidates}, reply
+            text, routing_session, active_candidate, {item.display_index: item for item in candidates}, reply
         )
         if decision is None:
             if skip_reason:
@@ -805,8 +932,13 @@ class VoteApplication:
                     session.short_id,
                 )
             return None
+        if session.time_routing and decision.source_type == VoteSource.QUOTED_REPLY:
+            quoted = next(item for item in candidates if item.id == decision.candidate_id)
+            if quoted.send_status != SendStatus.SENT or not quoted.sent_at or not after_image(stamp, quoted, quoted.sent_at):
+                logger.info("忽略引用投票：消息早于被引用图片或图片未成功发送（session=%s）", session.short_id)
+                return None
         now = utc_now()
-        previous = await self.store.upsert_vote(
+        result = await self.store.apply_vote(
             Vote(
                 id=None,
                 session_id=session.id,
@@ -819,9 +951,16 @@ class VoteApplication:
                 created_at=now,
                 updated_at=now,
                 character=decision.character,
+                message_time=stamp.message_time or stamp.received_at,
+                message_sequence=stamp.sequence,
+                received_at=stamp.received_at,
             ),
-            policy=self.config.same_user_vote_policy,
+            policy=session.vote_policy or self.config.same_user_vote_policy,
         )
+        if not result.accepted:
+            logger.info("忽略重复或未胜出的评分（session=%s，人物=%s）", session.short_id, decision.character)
+            return None
+        previous = result.previous_score
         candidate = next((item for item in candidates if item.id == decision.candidate_id), None)
         logger.info(
             "记录投票 session=%s 人物=%s（来源图片第%s张 %s）：%s(%s) %s分 来源=%s%s",

@@ -36,6 +36,7 @@ _workspace_module = _internal("src.workspace_api")
 _models_module = _internal("src.models")
 _character_service_module = _internal("src.character_service")
 _maintenance_module = _internal("src.maintenance")
+_vote_timing_module = _internal("src.vote_timing")
 
 register = _compat.register
 filter = _compat.filter
@@ -426,9 +427,25 @@ class ImageVotePlugin(Star):
         if command == "status":
             yield self._plain_result(event, await self._status_text(group_id))
             return
-        if command in {"export", "cleanup", "purge"}:
+        if command in {"send", "export", "cleanup", "purge"}:
             if not is_admin_event(event):
                 yield self._plain_result(event, "只有 AstrBot 管理员可以执行此操作。")
+                return
+            if command == "send":
+                parts = argument_text.split()
+                if len(parts) > 1:
+                    yield self._plain_result(event, "用法：/vote send [短ID|session_id]")
+                    return
+                try:
+                    session = await self.application.send_report(
+                        group_id, parts[0] if parts else ""
+                    )
+                    yield self._plain_result(
+                        event,
+                        "报告已发送到本群：%s（%s）" % (session.project_name, session.short_id),
+                    )
+                except Exception as exc:
+                    yield self._plain_result(event, "发送失败：%s" % exc)
                 return
             if command == "export":
                 try:
@@ -510,7 +527,21 @@ class ImageVotePlugin(Star):
         sender_id = get_sender_id(event)
         if sender_id and sender_id == get_self_id(event):
             return None
+        if self.vote_router.parser.extract_digits(get_event_text(event)) is None:
+            return None
+        stamp = _vote_timing_module.event_stamp(event)
         self._ensure_config_throttled()
+        with self.application.vote_activity.receiving(group_id):
+            decision = await self._collect_group_vote(event, group_id, sender_id, stamp)
+        if decision is not None and self.settings.ack_vote:
+            respond = getattr(event, "send", None)
+            if callable(respond):
+                await respond(
+                    "已记录人物「%s」评分：%d" % (decision.character, decision.score)
+                )
+        return None
+
+    async def _collect_group_vote(self, event, group_id, sender_id, stamp):
         if not await self._group_needs_attention(group_id):
             return None
         managed = await self.session_manager.active_for_group(group_id)
@@ -521,6 +552,9 @@ class ImageVotePlugin(Star):
             session = persisted
         else:
             session = managed.session
+        if session.time_routing and stamp is None:
+            logger.warning("忽略投票：事件缺少可靠的原始接收时间（session=%s）", session.short_id)
+            return None
         candidates = await self.store.list_candidates(session.id)
         if not candidates:
             return None
@@ -534,15 +568,9 @@ class ImageVotePlugin(Star):
             active_candidate,
             reply=self.adapter.resolve_reply(event),
             message_id=get_message_id(event),
+            stamp=stamp,
         )
-        if decision is not None and self.settings.ack_vote:
-            respond = getattr(event, "send", None)
-            if callable(respond):
-                await respond(
-                    "已记录人物「%s」评分：%d"
-                    % (decision.character, decision.score)
-                )
-        return None
+        return decision
 
     def _ensure_config_throttled(self) -> None:
         """群消息热路径上的配置检查最多每秒一次；指令路径仍用无节流的 _ensure_config。"""
@@ -557,12 +585,14 @@ class ImageVotePlugin(Star):
 
         既没有场次、又不在白名单里的群直接退出，避免每条群消息都做一次 SQLite 查询。
         只缓存「没有场次」这个结论：场次一开始就会出现在内存里的活跃表，不受缓存影响。
-        结算中（FINALIZING）与准备中（PREPARING）同样不处理：截止符号已经发出，
-        此后的数字与引用票一律不计，也就不必记录。
+        结算中仍允许截止前已经进入收票流程的事件完成；封存后不再收票。
         """
         managed = await self.session_manager.active_for_group(group_id)
         if managed is not None:
-            return managed.session.status in {SessionStatus.RUNNING, SessionStatus.PAUSED}
+            return managed.session.status in {SessionStatus.RUNNING, SessionStatus.PAUSED} or (
+                managed.session.time_routing and managed.session.status == SessionStatus.FINALIZING
+                and not self.application.vote_activity.is_sealed(managed.session)
+            )
         if self.settings.allowed_group_ids and group_id not in self.settings.allowed_group_ids:
             return False
         now = time.monotonic()
@@ -609,6 +639,7 @@ class ImageVotePlugin(Star):
             "stop",
             "finish",
             "export",
+            "send",
             "cleanup",
             "register",
             "unregister",

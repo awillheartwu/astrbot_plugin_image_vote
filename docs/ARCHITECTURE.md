@@ -1,6 +1,6 @@
 # 首轮架构与接力说明
 
-> 2026-09-16 注：本文记录首轮架构决策，分层与边界仍然有效；其中的版本事实与「下一步」已更新。当前版本与验收状态以 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 为准。
+> 2026-10-21 注：本文记录首轮架构决策，分层与边界仍然有效；其中的版本事实与「下一步」已更新。当前版本与验收状态以 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 为准。
 
 ## 目标
 
@@ -40,13 +40,15 @@ OneBot、SQLite、Pillow、AstrBot provider
 
 ## 数据模型
 
-SQLite 表为 `sessions`、`candidates`、`votes`。
+SQLite 表为 `sessions`、`candidates`、`vote_windows`、`votes`。
 
 - `sessions.id` 是全局 session ID；`short_id` 只用于群消息标记。
 - `candidates.id` 不依赖数组 index，且由应用层按 session 作用域生成；`display_index` 只表示当前快照中的展示顺序。
-- `sessions.active_character` 是普通数字票的当前人物目标，`active_candidate_id` 只保留最近成功发送图片的来源信息。
+- 新场次设置 `sessions.time_routing`，普通数字票通过 `vote_windows` 的开放与关闭记录匹配消息原始接收时刻；`active_character` 与 `active_candidate_id` 继续表示实时展示进度。旧场次保留原来的路由方式，不推测历史窗口。
 - `votes.character_name` 是票的统计目标，唯一键是 `(session_id, character_name, voter_id)`；`candidate_id` 记录触发该人物最终票的来源图片。
 - 同一人物图片在候选快照中连续排列；人物第一张成功发送后开放投票，最后一张发送完成后才开始完整人物间隔。
+- `vote_timing.py` 保存轻量并发守卫和纯时间/顺序规则。入口在第一次 await 前登记收票，结算固定截止点并等待已登记收票完成后封存；图片进度、回执和开窗记录在同一事务提交，取消协程不会提前释放仍在 SQLite 线程写入中的评分。
+- aiocqhttp 群发图在适配层调用 OneBot `send_group_msg` 并读取 `get_msg` 回执，保存消息 ID、平台时间与 `real_seq`；其他平台保留 `Context.send_message` 路径。`message_seq` 不作为真实顺序。元数据读取失败保留发送成功结果，降级到本机确认时间并告警。
 - `source_relative_path` 永远相对项目根目录，报告和群消息不暴露绝对路径。
 
 ## Reply 解析方案
@@ -76,7 +78,7 @@ SQLite 表为 `sessions`、`candidates`、`votes`。
 
 上述「仍未确认」项均已在后续真机运行中确认：`filter` / `EventMessageType` 由 `astrbot.api.event.filter` 提供；`Reply` 组件带完整 `chain` 与 `message_str`；`Context.llm_generate(chat_provider_id=…, prompt=…)` 与 `get_current_chat_provider_id(umo)` 按本文接线方式工作。唯一要留意的边界：引用文本偶尔会带上平台拼进的 `@昵称(qq)` 片段，解析层会先剥离。
 
-## 当前状态与后续（2026-09-16）
+## 当前状态与后续（2026-10-21）
 
 架构里列出的能力都已落地并在真机验证：人物口径发送与计票、引用投票（`Reply` 带完整原文）、`Context.llm_generate` 与 `get_current_chat_provider_id` 接线、合并发送与拆条、目录与单文件报告、插件工作区四个页面，以及报告与面板的浏览器检查工具。
 

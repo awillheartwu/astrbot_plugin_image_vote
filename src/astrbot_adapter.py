@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import base64
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
+from .logging_utils import get_logger
+from .models import SendReceipt
 from .reply_resolver import ReplyPayload
+from .vote_timing import sequence, timestamp
+
+logger = get_logger()
 
 
 class AstrBotAdapter:
@@ -11,8 +19,29 @@ class AstrBotAdapter:
 
     def __init__(self, context: Any):
         self.context = context
+        self._receipt_warning_logged = False
 
-    async def send_vote_message(self, umo: str, text: str, image_paths: Sequence[Path]) -> Optional[str]:
+    def _warn_receipt(self, message, *args):
+        if not self._receipt_warning_logged:
+            logger.warning(message, *args)
+            self._receipt_warning_logged = True
+
+    @staticmethod
+    def _action_data(response):
+        if not isinstance(response, dict):
+            return {}
+        data = response.get("data")
+        return data if isinstance(data, dict) else response
+
+    async def send_vote_message(self, umo: str, text: str, image_paths: Sequence[Path]) -> SendReceipt:
+        parts = umo.split(":", 2)
+        getter = getattr(self.context, "get_platform_inst", None)
+        platform = getter(parts[0]) if len(parts) == 3 and callable(getter) else None
+        if (platform is not None and platform.meta().name == "aiocqhttp" and parts[1] == "GroupMessage"
+                and callable(getattr(getattr(platform, "bot", None), "call_action", None))):
+            group_id = parts[2].split("_")[-1]
+            if group_id.isdecimal():
+                return await self._send_onebot_vote(platform.bot, int(group_id), text, image_paths)
         try:
             from astrbot.api.event import MessageChain
 
@@ -28,7 +57,48 @@ class AstrBotAdapter:
         result = await self.context.send_message(umo, chain)
         if result is False:
             raise RuntimeError("AstrBot could not resolve unified message origin")
-        return None
+        self._warn_receipt("当前平台未提供发图消息时间/顺序，使用本机确认时间判断图片边界")
+        return SendReceipt(datetime.now(timezone.utc).isoformat())
+
+    async def _send_onebot_vote(self, bot, group_id, text, image_paths) -> SendReceipt:
+        """Use the same OneBot image payload, retaining the send API's message identity."""
+        def build_segments():
+            return [{"type": "text", "data": {"text": text}}] + [
+                {"type": "image", "data": {
+                    "file": "base64://" + base64.b64encode(Path(path).read_bytes()).decode("ascii")
+                }} for path in image_paths
+            ]
+
+        segments = await asyncio.to_thread(build_segments)
+        response = await bot.call_action("send_group_msg", group_id=group_id, message=segments)
+        acknowledged_at = datetime.now(timezone.utc).isoformat()
+        if isinstance(response, dict) and (response.get("status") == "failed" or response.get("retcode", 0) != 0):
+            raise RuntimeError("OneBot send_group_msg failed")
+        response = self._action_data(response)
+        message_id = response.get("message_id")
+        details = response
+        if message_id is not None:
+            try:
+                details = await asyncio.wait_for(bot.call_action("get_msg", message_id=message_id), timeout=2)
+                details = self._action_data(details)
+            except Exception as exc:
+                # The image was already sent. A metadata lookup failure must never resend it.
+                self._warn_receipt("发图成功，但读取消息时间/顺序失败，使用本机确认时间：%s", type(exc).__name__)
+                details = response
+        else:
+            self._warn_receipt("发图成功但未返回消息 ID，使用本机确认时间判断图片边界")
+        message_time = timestamp(details.get("time"))
+        message_sequence = sequence(details.get("real_seq"))
+        if message_time is None or message_sequence is None:
+            self._warn_receipt("发图回执缺少有效时间或真实序号，使用本机确认时间保守判断图片边界")
+        else:
+            self._receipt_warning_logged = False
+        return SendReceipt(
+            acknowledged_at,
+            str(message_id) if message_id is not None else None,
+            message_time,
+            message_sequence,
+        )
 
     async def send_text(self, umo: str, text: str) -> None:
         """纯文本通知（自动暂停提示等），不附带图片。"""

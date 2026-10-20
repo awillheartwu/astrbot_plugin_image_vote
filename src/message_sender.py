@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Awaitable, Callable, Optional, Sequence
+from typing import Awaitable, Callable, Optional, Sequence, Union
 
-from .models import Candidate, SendContext, Session
+from .models import Candidate, SendContext, SendReceipt, Session
 
 
 def build_start_summary(session: Session) -> str:
@@ -90,7 +90,7 @@ def _progress_marker(context: SendContext) -> str:
     return ""
 
 
-SendFunction = Callable[[str, str, Sequence[Path]], Awaitable[Optional[str]]]
+SendFunction = Callable[[str, str, Sequence[Path]], Awaitable[Optional[Union[str, SendReceipt]]]]
 
 
 class MessageSender:
@@ -99,7 +99,7 @@ class MessageSender:
         self.max_retries = max_retries
         self.retry_base_seconds = retry_base_seconds
 
-    async def send_candidate(self, session: Session, candidate: Candidate, image_paths: Sequence[Path]) -> Optional[str]:
+    async def send_candidate(self, session: Session, candidate: Candidate, image_paths: Sequence[Path]) -> Optional[Union[str, SendReceipt]]:
         text = build_vote_message(session, candidate)
         last_error = None
         for attempt in range(self.max_retries + 1):
